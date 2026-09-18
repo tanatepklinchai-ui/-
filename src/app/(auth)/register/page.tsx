@@ -56,7 +56,7 @@ export default function RegisterPage() {
               required
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
-              className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:bg-white transition-all"
+              className="w-full px-4 py-2.5 rounded-lg border border-gray-300 text-gray-900 font-medium placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
               placeholder="example@mail.com"
             />
           </div>
@@ -68,7 +68,7 @@ export default function RegisterPage() {
               required
               value={form.username}
               onChange={(e) => setForm({ ...form, username: e.target.value })}
-              className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:bg-white transition-all"
+              className="w-full px-4 py-2.5 rounded-lg border border-gray-300 text-gray-900 font-medium placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
               placeholder="username"
             />
           </div>
@@ -80,7 +80,7 @@ export default function RegisterPage() {
               required
               value={form.password}
               onChange={(e) => setForm({ ...form, password: e.target.value })}
-              className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:bg-white transition-all"
+              className="w-full px-4 py-2.5 rounded-lg border border-gray-300 text-gray-900 font-medium placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
               placeholder="••••••••"
             />
           </div>
@@ -92,7 +92,7 @@ export default function RegisterPage() {
                 type="password"
                 value={form.adminCode}
                 onChange={(e) => setForm({ ...form, adminCode: e.target.value })}
-                className="w-full px-4 py-2.5 rounded-xl border border-teal-200 bg-teal-50/40 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:bg-white transition-all"
+                className="w-full px-4 py-2.5 rounded-lg border border-gray-300 text-gray-900 font-medium placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white"
                 placeholder="กรอกรหัสยืนยันแอดมิน"
               />
             </div>
