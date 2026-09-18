@@ -2,7 +2,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth'; // นำเข้า getSession
-
+export const dynamic = 'force-dynamic';
 export async function GET() {
   const session = await getSession();
   if (!session) {

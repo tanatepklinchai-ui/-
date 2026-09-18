@@ -5,6 +5,7 @@ import { getSession } from '@/lib/auth'; // นำเข้า getSession
 // ในฟังก์ชัน POST ของ src/app/api/appointments/route.ts
 import { sendBookingConfirmation } from '@/lib/mailer';
 
+export const dynamic = 'force-dynamic';
 export async function POST(req: Request) {
   try {
     const session = await getSession();

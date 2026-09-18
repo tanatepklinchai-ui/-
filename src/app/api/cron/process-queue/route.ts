@@ -2,7 +2,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { sendAppointmentReminder } from '@/lib/mailer';
-
+export const dynamic = 'force-dynamic';
 export async function GET() {
   const now = new Date();
 

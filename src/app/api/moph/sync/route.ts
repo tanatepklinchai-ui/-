@@ -1,7 +1,7 @@
 // src/app/api/moph/sync/route.ts
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-
+export const dynamic = 'force-dynamic';
 const VACCINE_SCHEDULE = [
   { code: 'BCG', name: 'BCG', dose: 'เข็มที่ 1' },
   { code: 'HB1', name: 'ไวรัสตับอักเสบบี', dose: 'เข็มที่ 1' },

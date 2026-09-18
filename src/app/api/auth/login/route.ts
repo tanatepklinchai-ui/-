@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import bcrypt from 'bcrypt';
 import { prisma } from '@/lib/prisma';
 import { setSession } from '@/lib/auth'; // 1. นำเข้า setSession
-
+export const dynamic = 'force-dynamic';
 export async function POST(req: Request) {
   try {
     const { identifier, password } = await req.json();

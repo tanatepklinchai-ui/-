@@ -1,7 +1,7 @@
 // src/app/api/appointments/[id]/confirm/route.ts
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-
+export const dynamic = 'force-dynamic';
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
