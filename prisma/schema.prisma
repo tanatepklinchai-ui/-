@@ -1,0 +1,77 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  EXPIRED
+  CANCELLED
+}
+
+model User {
+  id           String          @id @default(uuid())
+  email        String          @unique
+  username     String          @unique
+  passwordHash String
+  role         Role            @default(USER)
+  profile      Profile?
+  appointments Appointment[]
+  vaccines     VaccineRecord[]
+  createdAt    DateTime        @default(now())
+}
+
+model Profile {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  firstName String
+  lastName  String
+  gender    Gender
+  weight    Float
+  height    Float
+  dob       DateTime
+  updatedAt DateTime @updatedAt
+}
+
+model Appointment {
+  id            String    @id @default(uuid())
+  userId        String
+  hospitalName  String
+  scheduledAt   DateTime
+  status        String    @default("PENDING") // PENDING, CONFIRMED, EXPIRED, CANCELLED
+  notified1Day  Boolean   @default(false)
+  notified1Hour Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VaccineRecord {
+  id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vaccineName      String
+  vaccineCode      String?
+  administeredDate DateTime
+  hospitalName     String
+  source           String   @default("MOPH_API")
+  createdAt        DateTime @default(now())
+}
