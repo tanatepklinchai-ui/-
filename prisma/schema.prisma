@@ -1,10 +1,12 @@
-datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
-}
+// prisma/schema.prisma
 
 generator client {
   provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql" // หรือประเภทฐานข้อมูลที่คุณใช้อยู่
+  url      = env("DATABASE_URL")
 }
 
 enum Role {
@@ -12,56 +14,79 @@ enum Role {
   ADMIN
 }
 
-enum Gender {
-  MALE
-  FEMALE
-  OTHER
-}
-
-enum AppointmentStatus {
-  PENDING
-  CONFIRMED
-  EXPIRED
-  CANCELLED
-}
-
 model User {
   id           String          @id @default(uuid())
   email        String          @unique
-  username     String          @unique
+  username     String
   passwordHash String
   role         Role            @default(USER)
+  createdAt    DateTime        @default(now())
   profile      Profile?
   appointments Appointment[]
-  vaccines     VaccineRecord[]
-  createdAt    DateTime        @default(now())
+  vaccineRecords VaccineRecord[]
 }
 
 model Profile {
-  id        String   @id @default(uuid())
-  userId    String   @unique
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  firstName String
-  lastName  String
-  gender    Gender
-  weight    Float
-  height    Float
-  dob       DateTime
-  updatedAt DateTime @updatedAt
+  id        String    @id @default(uuid())
+  userId    String    @unique
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  firstName String?
+  lastName  String?
+  gender    String?
+  weight    Float?
+  height    Float?
+  dob       DateTime?
+  updatedAt DateTime  @updatedAt
+}
+
+// ------------------------------------------------------
+// [เพิ่มใหม่] 1. ตารางเก็บข้อมูลสถานพยาบาล
+// ------------------------------------------------------
+model Hospital {
+  id           String         @id @default(uuid())
+  name         String         // ชื่อโรงพยาบาล
+  address      String?        // ที่อยู่
+  latitude     Float?         // พิกัดละติจูด (สำหรับคำนวณ GPS)
+  longitude    Float?         // พิกัดลองจิจูด (สำหรับคำนวณ GPS)
+  slots        HospitalSlot[] // เชื่อมกับตารางเวลาคิวว่าง
+  appointments Appointment[]  // เชื่อมกับประวัติการจองของ User
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+}
+
+// ------------------------------------------------------
+// [เพิ่มใหม่] 2. ตารางเก็บวันและเวลาว่างของแต่ละโรงพยาบาล
+// ------------------------------------------------------
+model HospitalSlot {
+  id         String   @id @default(uuid())
+  hospitalId String
+  hospital   Hospital @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  date       DateTime // วันที่เปิดรับคิว
+  time       String   // ช่วงเวลา เช่น "09:00", "13:30"
+  capacity   Int      @default(10) // จำนวนคิวที่รับได้ในเวลานั้น (เต็มแล้วซ่อน)
+  booked     Int      @default(0)  // จำนวนคิวที่ถูกจองไปแล้ว
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([hospitalId, date, time]) // ป้องกันไม่ให้สร้างคิวเวลาซ้ำกันในวันเดียวกัน
 }
 
 model Appointment {
-  id            String    @id @default(uuid())
-  userId        String
-  hospitalName  String
-  scheduledAt   DateTime
-  status        String    @default("PENDING") // PENDING, CONFIRMED, EXPIRED, CANCELLED
-  notified1Day  Boolean   @default(false)
-  notified1Hour Boolean   @default(false)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id           String    @id @default(uuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // เชื่อมความสัมพันธ์กับตาราง Hospital ของจริง
+  hospitalId   String?   
+  hospital     Hospital? @relation(fields: [hospitalId], references: [id])
+  
+  hospitalName String    // (คงฟิลด์เดิมไว้ เพื่อไม่ให้ข้อมูลเก่าที่เคยจองไว้พัง)
+  scheduledAt  DateTime
+  notified1Day Boolean   @default(false)
+  notified1Hour Boolean  @default(false)
+  status       String    @default("PENDING")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 }
 
 model VaccineRecord {
@@ -72,6 +97,6 @@ model VaccineRecord {
   vaccineCode      String?
   administeredDate DateTime
   hospitalName     String
-  source           String   @default("MOPH_API")
+  source           String   
   createdAt        DateTime @default(now())
 }

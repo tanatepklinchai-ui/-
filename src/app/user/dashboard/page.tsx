@@ -1,371 +1,213 @@
 // src/app/user/dashboard/page.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
-import Link from 'next/link';
+import { useState } from 'react';
 
+export default function ColorfulDashboard() {
+  const [hospitalName, setHospitalName] = useState('');
+  const [scheduledAt, setScheduledAt] = useState('');
 
-interface VaccineRecord {
-  id: string;
-  vaccineName: string;
-  administeredDate: string;
-  hospitalName: string;
-  source: string;
-}
+  // 1. ข้อมูลตารางวัคซีน อ้างอิงจากแผนงานสร้างเสริมภูมิคุ้มกันโรค สธ. ปี 2569
+  const vaccineHistory = [
+    { id: 1, age: 'แรกเกิด', name: 'HB1 (ตับอักเสบบี), BCG (วัณโรค)', status: 'ได้รับวัคซีนแล้ว' },
+    { id: 2, age: '1 เดือน', name: 'HB2 (ตับอักเสบบี - เฉพาะมารดาเป็นพาหะ)', status: 'ได้รับวัคซีนแล้ว' },
+    { id: 3, age: '2 เดือน', name: 'DTP-HB-Hib1 (คอตีบ-บาดทะยัก-ไอกรน-ตับอักเสบบี-ฮิบ), IPV1 (โปลิโอแบบฉีด), Rota1 (โรต้า)', status: 'ได้รับวัคซีนแล้ว' },
+    { id: 4, age: '4 เดือน', name: 'DTP-HB-Hib2, IPV2, Rota2', status: 'ได้รับวัคซีนแล้ว' },
+    { id: 5, age: '6 เดือน', name: 'DTP-HB-Hib3, OPV3 (โปลิโอแบบหยอด), Rota3', status: 'รอรับวัคซีน' },
+    { id: 6, age: '9 เดือน', name: 'MMR1 (หัด-คางทูม-หัดเยอรมัน)', status: 'รอรับวัคซีน' },
+    { id: 7, age: '1 ปี', name: 'LAJE1 (ไข้สมองอักเสบเจอี)', status: 'รอรับวัคซีน' },
+    { id: 8, age: '1 ปี 6 เดือน', name: 'DTP4, OPV4, MMR2', status: 'รอรับวัคซีน' },
+    { id: 9, age: '2 ปี 6 เดือน', name: 'LAJE2', status: 'รอรับวัคซีน' },
+    { id: 10, age: '4 ปี', name: 'DTP5, OPV5', status: 'รอรับวัคซีน' },
+  ];
 
-interface UserProfile {
-  firstName: string;
-  lastName: string;
-  gender: string;
-  weight: number | '';
-  height: number | '';
-  dob: string;
-}
+  const preVaccineTips = [
+    "สังเกตอาการเจ็บป่วยของเด็ก หากมีไข้สูงหรือเจ็บป่วยรุนแรง ควรแจ้งเจ้าหน้าที่ก่อนฉีดวัคซีน",
+    "ให้เด็กพักผ่อนให้เพียงพอ ก่อนมารับวัคซีน",
+    "ให้เด็กกินอาหารรับประทานอาหารและดื่มนมตามปกติ",
+    "เตรียมข้อมูลสุขภาพของเด็ก เช่น ประวัติแพ้ยา แพ้อาหาร การเจ็บป่วย และประวัติการได้รับวัคซีนครั้งที่ผ่านมา เพื่อแจ้งแก่เจ้าหน้าที่ก่อนฉีด"
+  ];
 
-export default function UserDashboard() {
-  const [profile, setProfile] = useState<UserProfile>({
-    firstName: '',
-    lastName: '',
-    gender: 'OTHER',
-    weight: '',
-    height: '',
-    dob: '',
-  });
+  const postVaccineTips = [
+    "สังเกตอาการหลังฉีดวัคซีน อย่างน้อย 30 นาทีที่สถานพยาบาล เพื่อดูอาการแพ้รุนแรง เช่น หายใจลำบาก หน้าบวม ปากบวม หรือมีผื่นทั่วตัว",
+    "บริเวณที่ฉีดอาจมีอาการปวด บวม แดง หรือกดเจ็บเล็กน้อย สามารถประคบเย็นบริเวณที่ฉีดเพื่อลดอาการได้ และหลีกเลี่ยงการนวดหรือกดแรง ๆ",
+    "หากมีไข้หรือไม่สบายตัว ให้เด็กพักผ่อนและดื่มน้ำหรือนมให้เพียงพอ หากไข้สูงหรือเด็กไม่สบายมาก ควรปรึกษาบุคลากรทางการแพทย์เรื่องการใช้ยาลดไข้",
+    "ให้เด็กรับประทานอาหารและนมตามปกติ ไม่จำเป็นต้องงดอาหารหลังฉีดวัคซีน",
+    "ติดตามอาการในช่วง 1–2 วันแรก อาการปวด บวม แดง หรือมีไข้เล็กน้อยมักเกิดขึ้นชั่วคราวและค่อย ๆ ดีขึ้น",
+    "รีบพาเด็กไปโรงพยาบาล หากมีอาการผิดปกติรุนแรง เช่น หายใจลำบาก ซึมมาก ชัก หมดสติ หน้าหรือคอบวม ไข้สูงมาก หรือร้องกวนผิดปกติและปลอบไม่หยุด",
+    "เก็บสมุดวัคซีนไว้และตรวจสอบวันนัดครั้งต่อไป เพื่อให้เด็กได้รับวัคซีนครบตามกำหนด"
+  ];
 
-  const [vaccines, setVaccines] = useState<VaccineRecord[]>([]);
-  const [isEditing, setIsEditing] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [syncingMoph, setSyncingMoph] = useState(false);
-  const [statusMessage, setStatusMessage] = useState('');
-
-  // โหลดข้อมูลโปรไฟล์และประวัติวัคซีน
-  useEffect(() => {
-    async function fetchUserData() {
-      try {
-        const res = await fetch('/api/user/profile');
-        if (res.ok) {
-          const data = await res.json();
-          if (data.profile) {
-            setProfile({
-              firstName: data.profile.firstName || '',
-              lastName: data.profile.lastName || '',
-              gender: data.profile.gender || 'OTHER',
-              weight: data.profile.weight || '',
-              height: data.profile.height || '',
-              dob: data.profile.dob ? data.profile.dob.split('T')[0] : '',
-            });
-          } else {
-            setIsEditing(true); // หากยังไม่เคยกรอก ให้เปิดโหมดแก้ไขทันที
-          }
-          setVaccines(data.vaccines || []);
-        }
-      } catch (err) {
-        console.error('Failed to load user data:', err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchUserData();
-  }, []);
-
-  // บันทึกการแก้ไขข้อมูลส่วนตัว
-  const handleSaveProfile = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-    setStatusMessage('');
-
-    try {
-      const res = await fetch('/api/user/profile', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(profile),
-      });
-
-      if (!res.ok) throw new Error('เกิดข้อผิดพลาดในการบันทึกข้อมูล');
-      setStatusMessage('บันทึกข้อมูลส่วนตัวเรียบร้อยแล้ว');
-      setIsEditing(false);
-    } catch (err: any) {
-      setStatusMessage(err.message || 'บันทึกไม่สำเร็จ');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // ดึงประวัติวัคซีนจาก MOPH API จำลอง
-  const handleSyncMOPH = async () => {
-    setSyncingMoph(true);
-    setStatusMessage('');
-    try {
-      const res = await fetch('/api/moph/sync', { method: 'POST' });
-      const data = await res.json();
-      if (res.ok) {
-        setVaccines(data.vaccines);
-        setStatusMessage('ซิงก์ข้อมูลประวัติวัคซีนจากกระทรวงสาธารณสุขสำเร็จ');
-      } else {
-        throw new Error(data.error);
-      }
-    } catch (err: any) {
-      setStatusMessage(err.message || 'ไม่สามารถเชื่อมต่อข้อมูลกระทรวงสาธารณสุขได้');
-    } finally {
-      setSyncingMoph(false);
-    }
-  };
-// ฟังก์ชันออกจากระบบและล้าง Cookie Session
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' });
     window.location.href = '/login';
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-500 text-sm">
-        กำลังโหลดข้อมูลแดชบอร์ด...
-      </div>
-    );
-  }
+  const handleBooking = (e: React.FormEvent) => {
+    e.preventDefault();
+    alert(`ระบบบันทึกการนัดหมายที่ ${hospitalName} สำเร็จ!`);
+    setHospitalName('');
+    setScheduledAt('');
+  };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800">
-      {/* Navbar มินิมอล */}
-      <nav className="bg-white border-b border-slate-100 px-6 py-4 flex justify-between items-center sticky top-0 z-10 shadow-xs">
-        <div className="flex items-center space-x-2">
-          <div className="w-3 h-3 rounded-full bg-teal-500"></div>
-          <span className="font-semibold text-lg tracking-tight text-slate-800">พร้อมฉีด</span>
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 text-slate-800 font-sans pb-12">
+      
+      <nav className="bg-white/80 backdrop-blur-md px-6 py-4 flex justify-between items-center sticky top-0 z-50 shadow-sm">
+        <div className="flex items-center space-x-3">
+          <div className="w-10 h-10 bg-gradient-to-tr from-teal-400 to-teal-300 rounded-2xl flex items-center justify-center text-white font-bold shadow-lg shadow-teal-200">
+            พ
+          </div>
+          <span className="font-extrabold text-xl text-teal-800 tracking-tight">พร้อมฉีด</span>
         </div>
-        <div className="flex items-center space-x-4">
-          <Link
-            href="/user/appointment"
-            className="text-xs font-medium bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 rounded-xl transition-all shadow-xs"
-          >
-            + นัดหมายฉีดวัคซีน
-          </Link>
-          <button
-  onClick={handleLogout}
-  className="text-xs font-medium text-slate-500 hover:text-slate-800 transition-colors"
->
-  ออกจากระบบ
-</button>
-        </div>
+        <button
+          onClick={handleLogout}
+          className="text-xs font-bold text-pink-500 hover:text-pink-600 bg-pink-50 hover:bg-pink-100 px-4 py-2 rounded-full transition-colors"
+        >
+          ออกจากระบบ
+        </button>
       </nav>
 
-      <main className="max-w-5xl mx-auto p-6 md:p-10 space-y-8">
-        {/* ข้อความแจ้งเตือนสถานะ */}
-        {statusMessage && (
-          <div className="p-3.5 rounded-xl bg-teal-50 border border-teal-100 text-teal-800 text-xs font-medium transition-all">
-            {statusMessage}
+      <main className="max-w-4xl mx-auto p-4 md:p-8 space-y-8">
+        
+        <div className="bg-white rounded-3xl p-6 shadow-xl shadow-blue-100/50 flex items-center gap-6 border-4 border-white relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-pink-100 rounded-full -mr-10 -mt-10 opacity-50"></div>
+          <div className="absolute bottom-0 right-20 w-16 h-16 bg-blue-100 rounded-full -mb-5 opacity-50"></div>
+          
+          <div className="w-20 h-20 bg-gradient-to-tr from-blue-300 to-blue-200 rounded-full flex items-center justify-center text-4xl border-4 border-white shadow-md z-10 shrink-0">
+            👦🏻
           </div>
-        )}
+          <div className="z-10">
+            <h1 className="text-2xl font-extrabold text-blue-900">น้องอุ่นใจ</h1>
+            <p className="text-sm text-blue-600 font-medium mt-1 bg-blue-50 inline-block px-3 py-1 rounded-full">อายุ 6 เดือน 12 วัน • น้ำหนัก 7.5 กก.</p>
+          </div>
+        </div>
 
-        {/* ส่วนที่ 1: ข้อมูลส่วนตัวและสรีระ */}
-        <section className="bg-white rounded-2xl border border-slate-100 p-6 md:p-8 shadow-xs">
-          <div className="flex justify-between items-center mb-6">
+        <section className="bg-white rounded-3xl p-6 md:p-8 shadow-xl shadow-indigo-100/50 border border-white">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-xl">💉</div>
             <div>
-              <h2 className="text-lg font-semibold text-slate-800">ข้อมูลส่วนตัวและสรีระ</h2>
-              <p className="text-xs text-slate-500 mt-0.5">ใช้สำหรับการคำนวณสัดส่วนและปริมาณยาในการเข้ารับบริการ</p>
+              <h2 className="text-xl font-bold text-indigo-900">ตารางประวัติการรับวัคซีน</h2>
+              <p className="text-xs text-indigo-500 mt-1">อ้างอิงตามแผนงาน สธ. ปี 2569</p>
             </div>
-            {!isEditing && (
-              <button
-                onClick={() => setIsEditing(true)}
-                className="text-xs font-medium text-teal-600 hover:text-teal-700 bg-teal-50 px-3.5 py-1.5 rounded-lg transition-all"
-              >
-                แก้ไขข้อมูล
-              </button>
-            )}
           </div>
-
-          <form onSubmit={handleSaveProfile} className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">ชื่อ</label>
-                <input
-                  type="text"
-                  disabled={!isEditing}
-                  required
-                  value={profile.firstName}
-                  onChange={(e) => setProfile({ ...profile, firstName: e.target.value })}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:opacity-75 disabled:bg-slate-100/50"
-                  placeholder="ชื่อจริง"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">นามสกุล</label>
-                <input
-                  type="text"
-                  disabled={!isEditing}
-                  required
-                  value={profile.lastName}
-                  onChange={(e) => setProfile({ ...profile, lastName: e.target.value })}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:opacity-75 disabled:bg-slate-100/50"
-                  placeholder="นามสกุล"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">เพศกำเนิด</label>
-                <select
-                  disabled={!isEditing}
-                  value={profile.gender}
-                  onChange={(e) => setProfile({ ...profile, gender: e.target.value })}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:opacity-75 disabled:bg-slate-100/50"
-                >
-                  <option value="MALE">ชาย</option>
-                  <option value="FEMALE">หญิง</option>
-                  <option value="OTHER">อื่นๆ / ไม่ระบุ</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">น้ำหนัก (กก.)</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  disabled={!isEditing}
-                  required
-                  value={profile.weight}
-                  onChange={(e) => setProfile({ ...profile, weight: parseFloat(e.target.value) || '' })}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:opacity-75 disabled:bg-slate-100/50"
-                  placeholder="55"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">ส่วนสูง (ซม.)</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  disabled={!isEditing}
-                  required
-                  value={profile.height}
-                  onChange={(e) => setProfile({ ...profile, height: parseFloat(e.target.value) || '' })}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:opacity-75 disabled:bg-slate-100/50"
-                  placeholder="170"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">วันเดือนปีเกิด</label>
-                <input
-                  type="date"
-                  disabled={!isEditing}
-                  required
-                  value={profile.dob}
-                  onChange={(e) => setProfile({ ...profile, dob: e.target.value })}
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50/50 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 disabled:opacity-75 disabled:bg-slate-100/50"
-                />
-              </div>
-            </div>
-
-            {isEditing && (
-              <div className="flex justify-end space-x-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsEditing(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-medium text-slate-600 hover:bg-slate-100 transition-colors"
-                >
-                  ยกเลิก
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="px-5 py-2 rounded-xl text-xs font-medium bg-teal-600 hover:bg-teal-700 text-white transition-all disabled:opacity-50"
-                >
-                  {saving ? 'กำลังบันทึก...' : 'บันทึกการเปลี่ยนแปลง'}
-                </button>
-              </div>
-            )}
-          </form>
-        </section>
-
-        {/* ส่วนที่ 2: ประวัติวัคซีนที่เคยได้รับ */}
-        <section className="bg-white rounded-2xl border border-slate-100 p-6 md:p-8 shadow-xs">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-800">ประวัติการรับวัคซีน</h2>
-              <p className="text-xs text-slate-500 mt-0.5">ข้อมูลที่ซิงก์จากฐานข้อมูลระบบสาธารณสุขและประวัติที่ยืนยันแล้ว</p>
-            </div>
-            <button
-              onClick={handleSyncMOPH}
-              disabled={syncingMoph}
-              className="inline-flex items-center text-xs font-medium border border-teal-200 text-teal-700 hover:bg-teal-50 px-3.5 py-2 rounded-xl transition-all self-start sm:self-auto disabled:opacity-50"
-            >
-              <svg className={`w-3.5 h-3.5 mr-1.5 ${syncingMoph ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-              </svg>
-              {syncingMoph ? 'กำลังซิงก์ MOPH API...' : 'ดึงข้อมูลจากกระทรวงสาธารณสุข'}
-            </button>
-          </div>
-
-          {vaccines.length === 0 ? (
-            <div className="py-12 text-center rounded-xl border border-dashed border-slate-200">
-              <p className="text-xs text-slate-400">ยังไม่มีประวัติการรับวัคซีนในระบบ</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs text-slate-600">
-                <thead className="bg-slate-50/75 uppercase tracking-wider text-slate-400 font-semibold border-b border-slate-100">
-                  <tr>
-                    <th className="py-3 px-4">ชื่อวัคซีน</th>
-                    <th className="py-3 px-4">วันที่ได้รับ</th>
-                    <th className="py-3 px-4">สถานที่ให้บริการ</th>
-                    <th className="py-3 px-4">แหล่งที่มา</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {vaccines.map((v) => (
-                    <tr key={v.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="py-3.5 px-4 font-medium text-slate-800">{v.vaccineName}</td>
-                      <td className="py-3.5 px-4">
-                        {v.administeredDate ? new Date(v.administeredDate).toLocaleDateString('th-TH') : '-'}
-                      </td>
-                      <td className="py-3.5 px-4">{v.hospitalName}</td>
-                      <td className="py-3.5 px-4">
-                        <span className="inline-block px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[10px]">
-                          {v.source === 'MOPH_API' ? 'กระทรวงสาธารณสุข' : 'ยืนยันด้วยตนเอง'}
+          
+          <div className="overflow-x-auto rounded-2xl border border-indigo-50">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-indigo-50 text-indigo-800">
+                <tr>
+                  <th className="py-4 px-4 font-bold rounded-tl-2xl whitespace-nowrap w-24">อายุ</th>
+                  <th className="py-4 px-4 font-bold">ชื่อวัคซีน</th>
+                  <th className="py-4 px-4 font-bold text-center rounded-tr-2xl w-36">สถานะ</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-indigo-50">
+                {vaccineHistory.map((item) => (
+                  <tr key={item.id} className="hover:bg-indigo-50/30 transition-colors">
+                    <td className="py-4 px-4 font-semibold text-indigo-900 whitespace-nowrap">{item.age}</td>
+                    <td className="py-4 px-4 text-slate-600 leading-relaxed">{item.name}</td>
+                    <td className="py-4 px-4 text-center">
+                      {item.status === 'ได้รับวัคซีนแล้ว' ? (
+                        <span className="inline-flex items-center justify-center w-full max-w-[120px] gap-1 bg-emerald-100 text-emerald-700 px-3 py-2 rounded-xl text-xs font-bold shadow-sm">
+                          ✅ ได้รับแล้ว
                         </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                      ) : (
+                        <span className="inline-flex items-center justify-center w-full max-w-[120px] gap-1 bg-amber-100 text-amber-600 px-3 py-2 rounded-xl text-xs font-bold shadow-sm">
+                          ⏳ รอรับวัคซีน
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <section className="bg-white rounded-3xl p-6 md:p-8 shadow-xl shadow-amber-100/50 border-t-4 border-amber-400">
+            <div className="flex items-center gap-3 mb-5">
+              <span className="text-2xl">📝</span>
+              <h2 className="text-lg font-bold text-amber-900">คำแนะนำก่อนรับวัคซีน</h2>
+            </div>
+            <ul className="space-y-3">
+              {preVaccineTips.map((tip, idx) => (
+                <li key={idx} className="flex items-start gap-3 bg-amber-50/50 p-3 rounded-2xl">
+                  <div className="w-6 h-6 rounded-full bg-amber-200 text-amber-800 flex items-center justify-center text-xs font-bold shrink-0">{idx + 1}</div>
+                  <p className="text-sm text-slate-700 leading-relaxed">{tip}</p>
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          <section className="bg-white rounded-3xl p-6 md:p-8 shadow-xl shadow-teal-100/50 border-t-4 border-teal-400">
+            <div className="flex items-center gap-3 mb-5">
+              <span className="text-2xl">🧸</span>
+              <h2 className="text-lg font-bold text-teal-900">การดูแลหลังรับวัคซีน</h2>
+            </div>
+            <ul className="space-y-3 h-full max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+              {postVaccineTips.map((tip, idx) => (
+                <li key={idx} className="flex items-start gap-3 bg-teal-50/50 p-3 rounded-2xl">
+                  <div className="w-6 h-6 rounded-full bg-teal-200 text-teal-800 flex items-center justify-center text-xs font-bold shrink-0">{idx + 1}</div>
+                  <p className="text-sm text-slate-700 leading-relaxed">{tip}</p>
+                </li>
+              ))}
+            </ul>
+          </section>
+        </div>
+
+        <section className="bg-gradient-to-br from-pink-400 to-rose-400 rounded-3xl p-6 md:p-10 shadow-xl shadow-pink-200 relative overflow-hidden mt-8">
+          <div className="absolute top-0 right-0 w-64 h-64 bg-white rounded-full mix-blend-overlay opacity-10 blur-3xl translate-x-1/2 -translate-y-1/2"></div>
+          <div className="absolute bottom-0 left-0 w-64 h-64 bg-white rounded-full mix-blend-overlay opacity-10 blur-3xl -translate-x-1/2 translate-y-1/2"></div>
+          
+          <div className="relative z-10 flex flex-col md:flex-row gap-8 items-center">
+            <div className="flex-1 text-center md:text-left text-white">
+              <h2 className="text-3xl font-extrabold mb-2">📅 จองคิวฉีดวัคซีน</h2>
+              <p className="text-pink-100 text-sm leading-relaxed mb-6">
+                สะดวก รวดเร็ว ไม่พลาดทุกเข็มสำคัญ <br className="hidden md:block" />
+                ระบบจะส่งการแจ้งเตือนไปยังอีเมลของคุณล่วงหน้า
+              </p>
+            </div>
+            
+            <form onSubmit={handleBooking} className="bg-white/95 backdrop-blur-sm p-6 rounded-3xl shadow-2xl w-full max-w-md space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-rose-800 mb-1">ชื่อสถานพยาบาล</label>
+                <input
+                  type="text"
+                  required
+                  value={hospitalName}
+                  onChange={(e) => setHospitalName(e.target.value)}
+                  placeholder="เช่น โรงพยาบาลศูนย์ชัยนาท"
+                  className="w-full px-4 py-3 rounded-2xl border-2 border-rose-50 bg-rose-50/30 text-sm focus:outline-none focus:border-rose-400 focus:ring-4 focus:ring-rose-100 transition-all text-slate-700"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-rose-800 mb-1">วันและเวลาที่นัดหมาย</label>
+                <input
+                  type="datetime-local"
+                  required
+                  value={scheduledAt}
+                  onChange={(e) => setScheduledAt(e.target.value)}
+                  className="w-full px-4 py-3 rounded-2xl border-2 border-rose-50 bg-rose-50/30 text-sm focus:outline-none focus:border-rose-400 focus:ring-4 focus:ring-rose-100 transition-all text-slate-700"
+                />
+              </div>
+              <button
+                type="submit"
+                className="w-full py-4 px-4 rounded-2xl bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white font-bold text-sm transition-all shadow-lg shadow-pink-200 mt-2"
+              >
+                ยืนยันการนัดหมาย
+              </button>
+            </form>
+          </div>
+        </section>
+
       </main>
+
+      <style dangerouslySetInnerHTML={{__html: `
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 20px; }
+      `}} />
     </div>
   );
 }
-// ใส่ต่อท้ายใน src/app/user/dashboard/page.tsx
-import { VACCINE_SCHEDULE } from '@/lib/vaccineSchedule';
-
-// ฟังก์ชันจัดกลุ่มวัคซีนตามช่วงอายุ
-const ageGroups = ['แรกเกิด', '2 เดือน', '4 เดือน', '6 เดือน', '9 เดือน', '12 เดือน', '18 เดือน', '4 ปี'];
-
-<section className="bg-white rounded-2xl border border-slate-100 p-6 md:p-8 shadow-xs">
-  <div className="mb-6">
-    <h2 className="text-lg font-semibold text-slate-800">ตารางวัคซีนสำหรับเด็กแรกเกิด – 5 ปี</h2>
-    <p className="text-xs text-slate-500 mt-0.5">อ้างอิงตามเกณฑ์แผนงานสร้างเสริมภูมิคุ้มกันโรค กระทรวงสาธารณสุข</p>
-  </div>
-
-  <div className="space-y-4">
-    {ageGroups.map((age) => {
-      const groupVaccines = VACCINE_SCHEDULE.filter((v) => v.ageCriteria === age);
-      return (
-        <div key={age} className="p-4 rounded-xl border border-slate-100 bg-slate-50/50 flex flex-col md:flex-row md:items-center justify-between gap-3">
-          <div className="w-28 shrink-0 font-medium text-sm text-teal-700 bg-teal-50 px-3 py-1 rounded-lg text-center">
-            {age}
-          </div>
-          <div className="flex-1 space-y-1">
-            {groupVaccines.map((item) => (
-              <div key={item.code} className="text-xs text-slate-600 flex items-center justify-between">
-                <span>• {item.name} {item.dose} <span className="text-slate-400">({item.description})</span></span>
-              </div>
-            ))}
-          </div>
-        </div>
-      );
-    })}
-  </div>
-</section>
