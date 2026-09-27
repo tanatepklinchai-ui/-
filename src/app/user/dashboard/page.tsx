@@ -166,7 +166,7 @@ export default function ColorfulDashboard() {
         <main className="flex-1 p-4 md:p-10 max-w-5xl mx-auto w-full space-y-8">
           
           {/* TAB 1: OVERVIEW (ภาพรวมโปรไฟล์) */}
-          {(activeTab === 'overview' || window && false) && (
+          {activeTab === 'overview' && (
             <div className="space-y-6 animate-fade-in">
               <div className="bg-white rounded-3xl p-6 md:p-8 shadow-xl shadow-blue-100/50 flex items-center gap-6 border-4 border-white relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-32 h-32 bg-pink-100 rounded-full -mr-10 -mt-10 opacity-50"></div>
@@ -205,7 +205,7 @@ export default function ColorfulDashboard() {
           )}
 
           {/* TAB 2: SCHEDULE (ตารางประวัติวัคซีน) */}
-          {(activeTab === 'schedule' || window && false) && (
+          {activeTab === 'schedule' && (
             <section className="bg-white rounded-3xl p-6 md:p-8 shadow-xl shadow-indigo-100/50 border border-white animate-fade-in">
               <div className="flex items-center gap-3 mb-6">
                 <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-xl">💉</div>
@@ -245,7 +245,7 @@ export default function ColorfulDashboard() {
           )}
 
           {/* TAB 3: APPOINTMENTS (ระบบจองคิว & โรงพยาบาลใกล้ฉัน) */}
-          {(activeTab === 'appointments' || window && false) && (
+          {activeTab === 'appointments' && (
             <section className="bg-white rounded-3xl p-6 md:p-8 shadow-xl shadow-rose-100/50 border-t-4 border-rose-400 animate-fade-in">
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
                 <div>
@@ -338,7 +338,7 @@ export default function ColorfulDashboard() {
           )}
 
           {/* TAB 4: TIPS (คำแนะนำก่อนและหลังฉีด) */}
-          {(activeTab === 'tips' || window && false) && (
+          {activeTab === 'tips' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-fade-in">
               <section className="bg-white rounded-3xl p-6 md:p-8 shadow-xl shadow-amber-100/50 border-t-4 border-amber-400">
                 <div className="flex items-center gap-3 mb-5">
