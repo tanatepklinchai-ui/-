@@ -19,6 +19,8 @@ type Appointment = {
   hospitalName: string;
   hospitalId: string | null;
   scheduledAt: string;
+  createdAt: string;
+  updatedAt: string;
   status: string;
   isWaitlisted: boolean;
   hospital: { slots: { date: string; time: string; booked: number; capacity: number }[] } | null;
@@ -41,6 +43,15 @@ type VaccineRecord = {
   hospitalName: string;
   source: string;
   verificationStatus: string;
+  createdAt: string;
+};
+
+type RecentActivity = {
+  id: string;
+  title: string;
+  description: string;
+  date: string;
+  kind: 'appointment' | 'vaccine';
 };
 
 function getDueDate(birthDate: string, ageInMonths: number) {
@@ -215,6 +226,46 @@ export default function ColorfulDashboard() {
     })
     : [];
   const visibleAppointments = appointments.filter((appointment) => appointment.status !== 'CANCELLED');
+  const verifiedVaccineCount = vaccineRows.filter(({ record }) => record?.verificationStatus === 'VERIFIED').length;
+  const vaccineProgress = vaccineRows.length > 0 ? Math.round((verifiedVaccineCount / vaccineRows.length) * 100) : 0;
+  const nextVaccine = vaccineRows.find(({ record }) => record?.verificationStatus !== 'VERIFIED') ?? null;
+  const todayKey = getBangkokDateKey(new Date());
+  const daysUntilNextVaccine = nextVaccine
+    ? Math.ceil((Date.parse(getBangkokDateKey(nextVaccine.dueDate)) - Date.parse(todayKey)) / 86_400_000)
+    : null;
+  const nextAppointment = appointments.find((appointment) =>
+    ['PENDING', 'CONFIRMED'].includes(appointment.status) && new Date(appointment.scheduledAt) > new Date()
+  );
+  const recentActivity: RecentActivity[] = [
+    ...vaccineRecords.map((record) => ({
+      id: `vaccine-${record.id}`,
+      title: record.verificationStatus === 'VERIFIED'
+        ? 'ยืนยันประวัติวัคซีนแล้ว'
+        : record.verificationStatus === 'REJECTED'
+          ? 'ประวัติวัคซีนต้องตรวจสอบอีกครั้ง'
+          : 'ส่งประวัติวัคซีนให้ตรวจสอบ',
+      description: `${record.vaccineName} · ${new Date(record.administeredDate).toLocaleDateString('th-TH')}`,
+      date: record.createdAt,
+      kind: 'vaccine' as const,
+    })),
+    ...appointments.map((appointment) => ({
+      id: `appointment-${appointment.id}`,
+      title: appointment.status === 'COMPLETED'
+        ? 'บันทึกการฉีดวัคซีนแล้ว'
+        : appointment.status === 'CANCELLED'
+          ? 'ยกเลิกนัดหมายแล้ว'
+          : appointment.status === 'EXPIRED'
+            ? 'นัดหมายหมดอายุ'
+            : appointment.isWaitlisted
+              ? 'ส่งคำขอเข้าคิวรออนุมัติ'
+              : appointment.status === 'CONFIRMED'
+                ? 'ยืนยันการจองแล้ว'
+                : 'บันทึกการจองแล้ว',
+      description: `${appointment.hospitalName} · ${new Date(appointment.scheduledAt).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' })}`,
+      date: appointment.updatedAt || appointment.createdAt,
+      kind: 'appointment' as const,
+    })),
+  ].sort((first, second) => new Date(second.date).getTime() - new Date(first.date).getTime()).slice(0, 5);
 
   const handleSaveProfile = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -644,32 +695,123 @@ export default function ColorfulDashboard() {
                 </form>
               </section>
 
-              {/* Quick Summary Cards */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="bg-white p-6 rounded-3xl shadow-lg shadow-indigo-50 border border-white flex items-center gap-4">
-                  <div className="w-12 h-12 bg-emerald-100 rounded-2xl flex items-center justify-center text-xl">✅</div>
-                  <div>
-                    <p className="text-xs text-slate-400 font-bold">ยืนยันประวัติแล้ว</p>
-                    <h3 className="text-xl font-extrabold text-slate-800">{vaccineRows.filter(({ record }) => record?.verificationStatus === 'VERIFIED').length} รายการ</h3>
-                  </div>
-                </div>
-                <div className="bg-white p-6 rounded-3xl shadow-lg shadow-indigo-50 border border-white flex items-center gap-4">
-                  <div className="w-12 h-12 bg-amber-100 rounded-2xl flex items-center justify-center text-xl">⏳</div>
-                  <div>
-                    <p className="text-xs text-slate-400 font-bold">รอตรวจสอบ/ไม่มีข้อมูล</p>
-                    <h3 className="text-xl font-extrabold text-slate-800">{vaccineRows.filter(({ record, isDue }) => record?.verificationStatus === 'PENDING' || record?.verificationStatus === 'REJECTED' || (!record && isDue)).length} รายการ</h3>
-                  </div>
-                </div>
-                <div className="bg-white p-6 rounded-3xl shadow-lg shadow-indigo-50 border border-white flex items-center gap-4">
-                  <div className="w-12 h-12 bg-rose-100 rounded-2xl flex items-center justify-center text-xl">📅</div>
-                  <div>
-                    <p className="text-xs text-slate-400 font-bold">นัดหมายถัดไป</p>
-                    <h3 className="text-base font-extrabold text-slate-800">
-                      {appointments.find((appointment) => appointment.status === 'PENDING' && new Date(appointment.scheduledAt) > new Date())?.hospitalName ?? 'ยังไม่มีคิว'}
-                    </h3>
-                  </div>
-                </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                <section className="rounded-2xl border border-emerald-100 bg-white p-5 shadow-sm">
+                  <p className="text-xs font-bold text-slate-500">ประวัติที่ยืนยันแล้ว</p>
+                  <p className="mt-2 text-2xl font-extrabold text-emerald-800">{verifiedVaccineCount}<span className="ml-1 text-sm font-semibold text-slate-500">/ {vaccineRows.length} รายการ</span></p>
+                </section>
+                <section className="rounded-2xl border border-sky-100 bg-white p-5 shadow-sm">
+                  <p className="text-xs font-bold text-slate-500">ความคืบหน้าการรับวัคซีน</p>
+                  {vaccineRows.length > 0 ? (
+                    <>
+                      <div className="mt-3 flex items-center gap-3">
+                        <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-label="ความคืบหน้าการรับวัคซีน" aria-valuemin={0} aria-valuemax={100} aria-valuenow={vaccineProgress}>
+                          <div className="h-full rounded-full bg-gradient-to-r from-teal-500 to-emerald-400 transition-all duration-500" style={{ width: `${vaccineProgress}%` }} />
+                        </div>
+                        <span className="min-w-10 text-right text-sm font-extrabold text-teal-800">{vaccineProgress}%</span>
+                      </div>
+                      <p className="mt-2 text-[11px] text-slate-500">นับเฉพาะรายการที่เจ้าหน้าที่ยืนยันแล้ว</p>
+                    </>
+                  ) : (
+                    <p className="mt-3 text-sm font-semibold text-slate-500">เพิ่มวันเกิดเพื่อคำนวณกำหนดวัคซีน</p>
+                  )}
+                </section>
+                <section className="rounded-2xl border border-indigo-100 bg-white p-5 shadow-sm">
+                  <p className="text-xs font-bold text-slate-500">นัดหมายถัดไป</p>
+                  {nextAppointment ? (
+                    <>
+                      <p className="mt-2 truncate text-base font-extrabold text-indigo-900">{nextAppointment.hospitalName}</p>
+                      <p className="mt-1 text-xs text-slate-500">{new Date(nextAppointment.scheduledAt).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' })} น.</p>
+                      {nextAppointment.isWaitlisted && <p className="mt-1 text-xs font-bold text-amber-700">คิวเต็ม · รออนุมัติ</p>}
+                    </>
+                  ) : <p className="mt-2 text-base font-bold text-slate-400">ยังไม่มีนัดหมาย</p>}
+                </section>
               </div>
+
+              <section className={`overflow-hidden rounded-2xl border shadow-sm ${nextVaccine && nextVaccine.record?.verificationStatus !== 'PENDING' && nextVaccine.isDue ? 'border-rose-200 bg-gradient-to-br from-rose-50 via-white to-amber-50' : 'border-amber-100 bg-gradient-to-br from-amber-50 via-white to-sky-50'}`}>
+                <div className="flex flex-col gap-5 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+                  <div className="flex items-start gap-4">
+                    <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-2xl ${nextVaccine?.record?.verificationStatus === 'PENDING' ? 'bg-sky-100' : 'bg-amber-100'}`} aria-hidden="true">{nextVaccine?.record?.verificationStatus === 'PENDING' ? '⌛' : nextVaccine ? '💉' : '✓'}</div>
+                    <div>
+                      <p className="text-xs font-extrabold uppercase text-slate-500">วัคซีนเข็มถัดไป</p>
+                      {nextVaccine ? (
+                        <>
+                          <h2 className="mt-1 text-lg font-extrabold text-slate-900">{nextVaccine.vaccine.name} · {nextVaccine.vaccine.dose}</h2>
+                          <p className="mt-1 text-sm text-slate-600">กำหนดอายุ {nextVaccine.vaccine.ageCriteria} · {new Date(nextVaccine.dueDate).toLocaleDateString('th-TH', { dateStyle: 'medium', timeZone: 'UTC' })}</p>
+                          <p className={`mt-2 text-sm font-bold ${nextVaccine.record?.verificationStatus === 'PENDING' ? 'text-sky-800' : nextVaccine.isDue ? 'text-rose-700' : 'text-amber-800'}`}>
+                            {nextVaccine.record?.verificationStatus === 'PENDING'
+                              ? 'ได้รับข้อมูลจากผู้ปกครองแล้ว · รอเจ้าหน้าที่ตรวจสอบ'
+                              : nextVaccine.record?.verificationStatus === 'REJECTED'
+                                ? 'ประวัติเดิมต้องตรวจสอบอีกครั้ง'
+                                : daysUntilNextVaccine !== null && daysUntilNextVaccine <= 0
+                                  ? 'ถึงกำหนดแล้ว · ตรวจสมุดวัคซีนก่อนจอง'
+                                  : daysUntilNextVaccine !== null && daysUntilNextVaccine <= 30
+                                    ? `ใกล้ถึงกำหนดใน ${daysUntilNextVaccine} วัน`
+                                    : 'ยังไม่ถึงกำหนดรับวัคซีน'}
+                          </p>
+                        </>
+                      ) : childProfile?.dob ? (
+                        <>
+                          <h2 className="mt-1 text-lg font-extrabold text-emerald-900">ยืนยันครบทุกเข็มในตารางแล้ว</h2>
+                          <p className="mt-1 text-sm text-slate-600">หากมีวัคซีนเพิ่มเติม สามารถตรวจสอบกับบุคลากรทางการแพทย์ได้</p>
+                        </>
+                      ) : (
+                        <>
+                          <h2 className="mt-1 text-lg font-extrabold text-slate-800">เพิ่มวันเกิดเพื่อสร้างกำหนดวัคซีน</h2>
+                          <p className="mt-1 text-sm text-slate-600">ระบบยังไม่มีข้อมูลพอที่จะระบุวัคซีนเข็มถัดไป</p>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  {nextVaccine && (
+                    <button
+                      onClick={() => {
+                        if (nextVaccine.record?.verificationStatus === 'PENDING') {
+                          setActiveTab('schedule');
+                          return;
+                        }
+                        if (nextVaccine.record?.verificationStatus === 'REJECTED') {
+                          setRecordingVaccineCode(nextVaccine.vaccine.code);
+                          setVaccineError('');
+                          setActiveTab('schedule');
+                          return;
+                        }
+                        setVaccineToBook({ name: `${nextVaccine.vaccine.name} (${nextVaccine.vaccine.dose})`, age: nextVaccine.vaccine.ageCriteria });
+                        setActiveTab('appointments');
+                      }}
+                      className="shrink-0 rounded-xl bg-rose-600 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-rose-700"
+                    >
+                      {nextVaccine.record?.verificationStatus === 'PENDING' ? 'ดูสถานะตรวจสอบ' : nextVaccine.record?.verificationStatus === 'REJECTED' ? 'แก้ไขประวัติ' : 'ค้นหารอบเวลาว่าง'}
+                    </button>
+                  )}
+                </div>
+              </section>
+
+              <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+                <div className="flex items-end justify-between gap-3">
+                  <div>
+                    <h2 className="text-lg font-extrabold text-slate-900">กิจกรรมล่าสุด</h2>
+                    <p className="mt-1 text-xs text-slate-500">รายการจากนัดหมายและประวัติวัคซีนของเด็กคนนี้</p>
+                  </div>
+                  <span className="text-xs font-semibold text-slate-400">{recentActivity.length} รายการ</span>
+                </div>
+                {recentActivity.length === 0 ? (
+                  <p className="mt-5 rounded-xl bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">ยังไม่มีกิจกรรม เมื่อมีการจองหรือบันทึกวัคซีน รายการจะแสดงที่นี่</p>
+                ) : (
+                  <ol className="mt-5 divide-y divide-slate-100">
+                    {recentActivity.map((activity) => (
+                      <li key={activity.id} className="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
+                        <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-sm ${activity.kind === 'vaccine' ? 'bg-emerald-50 text-emerald-700' : 'bg-indigo-50 text-indigo-700'}`} aria-hidden="true">{activity.kind === 'vaccine' ? '✓' : '•'}</span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-bold text-slate-800">{activity.title}</p>
+                          <p className="mt-0.5 truncate text-xs text-slate-500">{activity.description}</p>
+                        </div>
+                        <time className="shrink-0 text-[11px] text-slate-400">{new Date(activity.date).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' })}</time>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </section>
             </div>
           )}
 
