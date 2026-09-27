@@ -5,12 +5,9 @@ import { calculateAgeDisplay } from '@/lib/utils/formatAge';
 
 interface UserData {
   id: string;
-  name: string;
-  surname: string;
-  gender: string;
-  weight: number;
-  height: number;
-  birthDate: string;
+  username: string;
+  email: string;
+  children: { id: string; firstName: string | null; lastName: string | null; dob: string | null }[];
 }
 
 interface AppointmentData {
@@ -36,6 +33,7 @@ interface PendingVaccineRecord {
   administeredDate: string;
   hospitalName: string;
   user: { username: string; email: string };
+  child: { firstName: string | null; lastName: string | null };
 }
 
 export default function AdminDashboardPage() {
@@ -129,6 +127,7 @@ export default function AdminDashboardPage() {
               <thead>
                 <tr className="bg-gray-100 text-gray-700 border-b">
                   <th className="p-3">ผู้รายงาน</th>
+                  <th className="p-3">เด็ก</th>
                   <th className="p-3">วัคซีน</th>
                   <th className="p-3">วันที่ได้รับ</th>
                   <th className="p-3">สถานพยาบาลในสมุด</th>
@@ -139,6 +138,7 @@ export default function AdminDashboardPage() {
                 {pendingVaccineRecords.map((record) => (
                   <tr key={record.id} className="border-b">
                     <td className="p-3">{record.user.username}<span className="block text-xs text-gray-500">{record.user.email}</span></td>
+                    <td className="p-3">{[record.child.firstName, record.child.lastName].filter(Boolean).join(' ') || 'ไม่ระบุชื่อ'}</td>
                     <td className="p-3">{record.vaccineName}<span className="block text-xs text-gray-500">{record.vaccineCode}</span></td>
                     <td className="p-3 whitespace-nowrap">{new Date(record.administeredDate).toLocaleDateString('th-TH')}</td>
                     <td className="p-3">{record.hospitalName}</td>
@@ -173,30 +173,37 @@ export default function AdminDashboardPage() {
         </div>
       </div>
 
-      {/* 2. ข้อมูลตัวผู้ใช้และอายุ */}
+      {/* 2. บัญชีผู้ใช้และข้อมูลเด็ก */}
       <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-        <h2 className="text-lg font-bold mb-4 text-gray-800">2. รายชื่อผู้ใช้งานและข้อมูลสรีระ</h2>
+        <h2 className="text-lg font-bold mb-4 text-gray-800">2. ผู้ปกครองและเด็กในบัญชี</h2>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm border-collapse">
             <thead>
               <tr className="bg-gray-100 text-gray-700 border-b">
-                <th className="p-3">ชื่อ - นามสกุล</th>
-                <th className="p-3">เพศ</th>
-                <th className="p-3">น้ำหนัก (กก.)</th>
-                <th className="p-3">ส่วนสูง (ซม.)</th>
-                <th className="p-3">วันเดือนปีเกิด</th>
-                <th className="p-3 font-bold text-teal-800">อายุ (ต่ำกว่า 4 ปีนับเดือน)</th>
+                <th className="p-3">บัญชีผู้ปกครอง</th>
+                <th className="p-3">เด็กและวันเกิด</th>
               </tr>
             </thead>
             <tbody>
               {users.map((u) => (
                 <tr key={u.id} className="border-b hover:bg-gray-50">
-                  <td className="p-3">{u.name} {u.surname}</td>
-                  <td className="p-3">{u.gender || '-'}</td>
-                  <td className="p-3">{u.weight || '-'}</td>
-                  <td className="p-3">{u.height || '-'}</td>
-                  <td className="p-3">{u.birthDate ? new Date(u.birthDate).toLocaleDateString('th-TH') : '-'}</td>
-                  <td className="p-3 font-semibold text-teal-700">{calculateAgeDisplay(u.birthDate)}</td>
+                  <td className="p-3">{u.username}<span className="block text-xs text-gray-500">{u.email}</span></td>
+                  <td className="p-3">
+                    {u.children.length === 0 ? (
+                      <span className="text-gray-500">ยังไม่มีข้อมูลเด็ก</span>
+                    ) : (
+                      <ul className="space-y-1">
+                        {u.children.map((child, index) => (
+                          <li key={child.id}>
+                            <span className="font-medium">{[child.firstName, child.lastName].filter(Boolean).join(' ') || `เด็กคนที่ ${index + 1}`}</span>
+                            <span className="ml-2 text-xs text-gray-500">
+                              {child.dob ? `${new Date(child.dob).toLocaleDateString('th-TH')} (${calculateAgeDisplay(child.dob)})` : 'ยังไม่ระบุวันเกิด'}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

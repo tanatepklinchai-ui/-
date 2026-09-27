@@ -1,15 +1,25 @@
 // src/app/api/admin/dashboard/route.ts
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getSession } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 export async function GET() {
+  const session = await getSession();
+  if (!session || session.role !== 'ADMIN') {
+    return NextResponse.json({ error: 'ไม่มีสิทธิ์เข้าถึงข้อมูลนี้' }, { status: 403 });
+  }
+
   try {
     // 1. ดึงรายชื่อผู้ใช้พร้อมโปรไฟล์
     const users = await prisma.user.findMany({
       where: { role: 'USER' },
       include: {
         profile: true,
+        children: {
+          select: { id: true, firstName: true, lastName: true, dob: true },
+          orderBy: { createdAt: 'asc' },
+        },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -26,6 +36,7 @@ export async function GET() {
 
     // 3. รวมสถิติวัคซีนที่ได้รับการยืนยันแล้ว แยกตามประเภท
     const confirmedVaccines = await prisma.vaccineRecord.groupBy({
+      where: { verificationStatus: 'VERIFIED' },
       by: ['vaccineName'],
       _count: {
         vaccineName: true,
@@ -59,13 +70,18 @@ export async function GET() {
       vaccineStats,
       chartData: chartData.length > 0 ? chartData : [{ time: 'วันนี้', count: users.length }],
     });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'ไม่สามารถโหลดข้อมูล Admin ได้' }, { status: 500 });
   }
 }
 
 // API สำหรับแอดมินแก้ไขข้อมูลนัดหมาย
 export async function PATCH(req: Request) {
+  const session = await getSession();
+  if (!session || session.role !== 'ADMIN') {
+    return NextResponse.json({ error: 'ไม่มีสิทธิ์ดำเนินการนี้' }, { status: 403 });
+  }
+
   try {
     const { appointmentId, hospitalName, scheduledAt, status } = await req.json();
 
@@ -79,7 +95,7 @@ export async function PATCH(req: Request) {
     });
 
     return NextResponse.json({ success: true, appointment: updated });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (error: unknown) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'ไม่สามารถแก้ไขนัดหมายได้' }, { status: 500 });
   }
 }

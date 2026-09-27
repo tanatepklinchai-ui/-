@@ -53,15 +53,28 @@ function appointmentInclude() {
   };
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: 'กรุณาเข้าสู่ระบบก่อนใช้งาน' }, { status: 401 });
   }
 
   try {
+    const childId = new URL(req.url).searchParams.get('childId');
+    if (!childId) {
+      return NextResponse.json({ error: 'กรุณาเลือกเด็กเพื่อดูนัดหมาย' }, { status: 400 });
+    }
+
+    const child = await prisma.child.findFirst({
+      where: { id: childId, userId: session.userId },
+      select: { id: true },
+    });
+    if (!child) {
+      return NextResponse.json({ error: 'ไม่พบข้อมูลเด็ก' }, { status: 404 });
+    }
+
     const appointments = await prisma.appointment.findMany({
-      where: { userId: session.userId },
+      where: { userId: session.userId, childId },
       orderBy: { scheduledAt: 'asc' },
       include: appointmentInclude(),
     });
@@ -79,11 +92,12 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    const { hospitalId, scheduledAt } = body;
+    const { childId, hospitalId, scheduledAt } = body;
     const appointmentDate = new Date(scheduledAt);
 
     if (
       typeof hospitalId !== 'string' ||
+      typeof childId !== 'string' ||
       !isValidAppointmentDate(scheduledAt)
     ) {
       return NextResponse.json({ error: 'ข้อมูลนัดหมายไม่ถูกต้อง' }, { status: 400 });
@@ -91,6 +105,14 @@ export async function POST(req: Request) {
 
     const { date, time } = getBangkokSlot(appointmentDate);
     const appointment = await prisma.$transaction(async (transaction) => {
+      const child = await transaction.child.findFirst({
+        where: { id: childId, userId: session.userId },
+        select: { id: true },
+      });
+      if (!child) {
+        throw new AppointmentRequestError('ไม่พบข้อมูลเด็ก', 404);
+      }
+
       const hospital = await transaction.hospital.findUnique({
         where: { id: hospitalId },
         select: { id: true, name: true },
@@ -117,6 +139,7 @@ export async function POST(req: Request) {
       return transaction.appointment.create({
         data: {
           userId: session.userId,
+          childId: child.id,
           hospitalId: hospital.id,
           hospitalName: hospital.name,
           scheduledAt: appointmentDate,

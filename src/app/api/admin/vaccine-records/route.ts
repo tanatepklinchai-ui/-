@@ -19,7 +19,10 @@ export async function GET() {
   try {
     const records = await prisma.vaccineRecord.findMany({
       where: { verificationStatus: 'PENDING' },
-      include: { user: { select: { username: true, email: true } } },
+      include: {
+        user: { select: { username: true, email: true } },
+        child: { select: { firstName: true, lastName: true } },
+      },
       orderBy: { createdAt: 'asc' },
     });
     return NextResponse.json({ records });

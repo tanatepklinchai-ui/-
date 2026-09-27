@@ -22,6 +22,7 @@ type Appointment = {
 };
 
 type ChildProfile = {
+  id: string;
   firstName: string | null;
   lastName: string | null;
   dob: string | null;
@@ -88,6 +89,9 @@ export default function ColorfulDashboard() {
   const [editingAppointmentId, setEditingAppointmentId] = useState<string | null>(null);
   const [editSlotKey, setEditSlotKey] = useState('');
   const [childProfile, setChildProfile] = useState<ChildProfile | null>(null);
+  const [children, setChildren] = useState<ChildProfile[]>([]);
+  const [selectedChildId, setSelectedChildId] = useState<string | null>(null);
+  const [isAddingChild, setIsAddingChild] = useState(false);
   const [profileForm, setProfileForm] = useState({ firstName: '', dob: '', weight: '', height: '' });
   const [profileLoading, setProfileLoading] = useState(true);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
@@ -100,48 +104,96 @@ export default function ColorfulDashboard() {
   const [vaccineError, setVaccineError] = useState('');
 
   useEffect(() => {
+    if (!selectedChildId) {
+      return;
+    }
+
+    const controller = new AbortController();
     const loadAppointments = async () => {
+      setAppointmentsLoading(true);
       try {
-        const response = await fetch('/api/appointments');
+        const response = await fetch(`/api/appointments?childId=${encodeURIComponent(selectedChildId)}`, { signal: controller.signal });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'ไม่สามารถดึงข้อมูลนัดหมายได้');
         setAppointments(data.appointments);
       } catch (error) {
-        setAppointmentError(error instanceof Error ? error.message : 'ไม่สามารถดึงข้อมูลนัดหมายได้');
+        if (!controller.signal.aborted) {
+          setAppointmentError(error instanceof Error ? error.message : 'ไม่สามารถดึงข้อมูลนัดหมายได้');
+        }
       } finally {
-        setAppointmentsLoading(false);
+        if (!controller.signal.aborted) setAppointmentsLoading(false);
       }
     };
 
     void loadAppointments();
-  }, []);
+    return () => controller.abort();
+  }, [selectedChildId]);
 
   useEffect(() => {
-    const loadProfileAndVaccines = async () => {
+    const loadChildren = async () => {
       try {
-        const response = await fetch('/api/auth/user/profile');
+        const response = await fetch('/api/children');
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'ไม่สามารถโหลดข้อมูลเด็กได้');
-        setChildProfile(data.profile);
-        setVaccineRecords(data.vaccines ?? []);
-        if (data.profile) {
+        const loadedChildren: ChildProfile[] = data.children ?? [];
+        setChildren(loadedChildren);
+        if (loadedChildren.length > 0) {
+          const query = new URLSearchParams(window.location.search);
+          const requestedChildId = query.get('childId');
+          const firstChild = loadedChildren.find((child) => child.id === requestedChildId) ?? loadedChildren[0];
+          if (query.get('tab') === 'appointments') setActiveTab('appointments');
+          setAppointmentsLoading(true);
+          setVaccineLoading(true);
+          setChildProfile(firstChild);
+          setSelectedChildId(firstChild.id);
           setProfileForm({
-            firstName: data.profile.firstName ?? '',
-            dob: data.profile.dob ? data.profile.dob.slice(0, 10) : '',
-            weight: data.profile.weight?.toString() ?? '',
-            height: data.profile.height?.toString() ?? '',
+            firstName: firstChild.firstName ?? '',
+            dob: firstChild.dob ? firstChild.dob.slice(0, 10) : '',
+            weight: firstChild.weight?.toString() ?? '',
+            height: firstChild.height?.toString() ?? '',
           });
+        } else {
+          setIsAddingChild(true);
+          setAppointmentsLoading(false);
+          setVaccineLoading(false);
         }
       } catch (error) {
         setProfileError(error instanceof Error ? error.message : 'ไม่สามารถโหลดข้อมูลเด็กได้');
+        setAppointmentsLoading(false);
+        setVaccineLoading(false);
       } finally {
         setProfileLoading(false);
-        setVaccineLoading(false);
       }
     };
 
-    void loadProfileAndVaccines();
+    void loadChildren();
   }, []);
+
+  useEffect(() => {
+    if (!selectedChildId) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const loadVaccineRecords = async () => {
+      setVaccineLoading(true);
+      try {
+        const response = await fetch(`/api/vaccines/records?childId=${encodeURIComponent(selectedChildId)}`, { signal: controller.signal });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'ไม่สามารถโหลดประวัติวัคซีนได้');
+        setVaccineRecords(data.records ?? []);
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setVaccineError(error instanceof Error ? error.message : 'ไม่สามารถโหลดประวัติวัคซีนได้');
+        }
+      } finally {
+        if (!controller.signal.aborted) setVaccineLoading(false);
+      }
+    };
+
+    void loadVaccineRecords();
+    return () => controller.abort();
+  }, [selectedChildId]);
 
   const vaccineRows = childProfile?.dob
     ? VACCINE_SCHEDULE.map((vaccine) => {
@@ -157,14 +209,20 @@ export default function ColorfulDashboard() {
     setIsSavingProfile(true);
     setProfileError('');
     try {
-      const response = await fetch('/api/auth/user/profile', {
-        method: 'POST',
+      const response = await fetch(isAddingChild || !selectedChildId ? '/api/children' : `/api/children/${selectedChildId}`, {
+        method: isAddingChild || !selectedChildId ? 'POST' : 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(profileForm),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'ไม่สามารถบันทึกข้อมูลเด็กได้');
-      setChildProfile(data.profile);
+      const savedChild: ChildProfile = data.child;
+      setChildProfile(savedChild);
+      setChildren((current) => current.some((child) => child.id === savedChild.id)
+        ? current.map((child) => child.id === savedChild.id ? savedChild : child)
+        : [...current, savedChild]);
+      setSelectedChildId(savedChild.id);
+      setIsAddingChild(false);
     } catch (error) {
       setProfileError(error instanceof Error ? error.message : 'ไม่สามารถบันทึกข้อมูลเด็กได้');
     } finally {
@@ -172,9 +230,41 @@ export default function ColorfulDashboard() {
     }
   };
 
+  const handleSelectChild = (childId: string) => {
+    const child = children.find((item) => item.id === childId);
+    if (!child) return;
+    setSelectedChildId(child.id);
+    setChildProfile(child);
+    setAppointments([]);
+    setVaccineRecords([]);
+    setAppointmentsLoading(true);
+    setVaccineLoading(true);
+    setIsAddingChild(false);
+    setProfileForm({
+      firstName: child.firstName ?? '',
+      dob: child.dob ? child.dob.slice(0, 10) : '',
+      weight: child.weight?.toString() ?? '',
+      height: child.height?.toString() ?? '',
+    });
+    setRecordingVaccineCode(null);
+  };
+
+  const handleAddChild = () => {
+    setSelectedChildId(null);
+    setChildProfile(null);
+    setAppointments([]);
+    setVaccineRecords([]);
+    setAppointmentsLoading(false);
+    setVaccineLoading(false);
+    setIsAddingChild(true);
+    setProfileForm({ firstName: '', dob: '', weight: '', height: '' });
+    setRecordingVaccineCode(null);
+    setProfileError('');
+  };
+
   const handleReportVaccine = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!recordingVaccineCode) return;
+    if (!recordingVaccineCode || !selectedChildId) return;
     setIsSavingVaccineRecord(true);
     setVaccineError('');
     try {
@@ -183,6 +273,7 @@ export default function ColorfulDashboard() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          childId: selectedChildId,
           vaccineCode: recordingVaccineCode,
           administeredDate: administeredDate.toISOString(),
           hospitalName: vaccineRecordForm.hospitalName,
@@ -254,6 +345,10 @@ export default function ColorfulDashboard() {
   };
 
   const handleBooking = async () => {
+    if (!selectedChildId) {
+      setAppointmentError('กรุณาเลือกเด็กก่อนจองนัดหมาย');
+      return;
+    }
     if (!selectedHospital || !selectedDateSlot) {
       alert('กรุณาเลือกโรงพยาบาลและเวลาที่ต้องการนัดหมาย');
       return;
@@ -269,7 +364,7 @@ export default function ColorfulDashboard() {
       const response = await fetch('/api/appointments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hospitalId: hospital.id, scheduledAt: scheduledAt.toISOString() }),
+        body: JSON.stringify({ childId: selectedChildId, hospitalId: hospital.id, scheduledAt: scheduledAt.toISOString() }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'ไม่สามารถบันทึกนัดหมายได้');
@@ -422,13 +517,40 @@ export default function ColorfulDashboard() {
           {activeTab === 'overview' && (
             <div className="space-y-6 animate-fade-in">
               <section className="bg-white rounded-3xl p-6 md:p-8 shadow-xl shadow-blue-100/50 border border-white">
-                <div className="flex items-center gap-4 mb-6">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
+                  <div className="flex items-center gap-4">
                   <div className="w-16 h-16 bg-sky-100 rounded-full flex items-center justify-center text-3xl">👶🏻</div>
                   <div>
-                    <h1 className="text-2xl font-extrabold text-blue-900">{childProfile?.firstName || 'ข้อมูลเด็ก'}</h1>
+                    <h1 className="text-2xl font-extrabold text-blue-900">{isAddingChild ? 'เพิ่มข้อมูลเด็ก' : childProfile?.firstName || 'ข้อมูลเด็ก'}</h1>
                     <p className="text-sm text-blue-600 mt-1">
                       {childProfile?.dob ? `อายุ ${calculateAgeDisplay(childProfile.dob)}` : 'เพิ่มวันเกิดเพื่อสร้างตารางวัคซีนตามอายุ'}
                     </p>
+                  </div>
+                  </div>
+                  <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                    {children.length > 0 && (
+                      <select
+                        value={isAddingChild ? '' : selectedChildId ?? ''}
+                        onChange={(event) => handleSelectChild(event.target.value)}
+                        className="min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 sm:min-w-48"
+                        aria-label="เลือกเด็ก"
+                      >
+                        {children.map((child, index) => (
+                          <option key={child.id} value={child.id}>{child.firstName || `เด็กคนที่ ${index + 1}`}</option>
+                        ))}
+                        {isAddingChild && <option value="">เพิ่มเด็กใหม่</option>}
+                      </select>
+                    )}
+                    {!isAddingChild && (
+                      <button onClick={handleAddChild} className="rounded-xl bg-sky-100 px-4 py-2.5 text-xs font-bold text-sky-800 hover:bg-sky-200">
+                        + เพิ่มเด็ก
+                      </button>
+                    )}
+                    {isAddingChild && children.length > 0 && (
+                      <button onClick={() => handleSelectChild(children[0].id)} className="rounded-xl bg-slate-100 px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-200">
+                        ยกเลิก
+                      </button>
+                    )}
                   </div>
                 </div>
                 {profileError && <p role="alert" className="mb-4 rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{profileError}</p>}
@@ -481,7 +603,7 @@ export default function ColorfulDashboard() {
                       disabled={isSavingProfile || profileLoading}
                       className="rounded-xl bg-teal-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-teal-700 disabled:opacity-60"
                     >
-                      {isSavingProfile ? 'กำลังบันทึก...' : 'บันทึกข้อมูลเด็ก'}
+                      {isSavingProfile ? 'กำลังบันทึก...' : isAddingChild ? 'เพิ่มเด็ก' : 'บันทึกข้อมูลเด็ก'}
                     </button>
                   </div>
                 </form>

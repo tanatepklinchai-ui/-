@@ -5,15 +5,28 @@ import { VACCINE_SCHEDULE } from '@/lib/vaccineSchedule';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(req: Request) {
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: 'กรุณาเข้าสู่ระบบก่อนใช้งาน' }, { status: 401 });
   }
 
   try {
+    const childId = new URL(req.url).searchParams.get('childId');
+    if (!childId) {
+      return NextResponse.json({ error: 'กรุณาเลือกเด็กเพื่อดูประวัติวัคซีน' }, { status: 400 });
+    }
+
+    const child = await prisma.child.findFirst({
+      where: { id: childId, userId: session.userId },
+      select: { id: true },
+    });
+    if (!child) {
+      return NextResponse.json({ error: 'ไม่พบข้อมูลเด็ก' }, { status: 404 });
+    }
+
     const records = await prisma.vaccineRecord.findMany({
-      where: { userId: session.userId },
+      where: { userId: session.userId, childId },
       orderBy: { administeredDate: 'desc' },
     });
     return NextResponse.json({ records });
@@ -30,12 +43,13 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    const { vaccineCode, administeredDate, hospitalName } = body;
+    const { childId, vaccineCode, administeredDate, hospitalName } = body;
     const vaccine = VACCINE_SCHEDULE.find((item) => item.code === vaccineCode);
     const date = new Date(administeredDate);
 
     if (
       !vaccine ||
+      typeof childId !== 'string' ||
       typeof administeredDate !== 'string' ||
       !Number.isFinite(date.getTime()) ||
       date > new Date() ||
@@ -44,20 +58,21 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'ข้อมูลประวัติวัคซีนไม่ถูกต้อง' }, { status: 400 });
     }
 
-    const profile = await prisma.profile.findUnique({
-      where: { userId: session.userId },
-      select: { dob: true },
+    const child = await prisma.child.findFirst({
+      where: { id: childId, userId: session.userId },
+      select: { id: true, dob: true },
     });
-    if (!profile?.dob) {
+    if (!child?.dob) {
       return NextResponse.json({ error: 'กรุณาบันทึกวันเกิดของเด็กก่อนเพิ่มประวัติวัคซีน' }, { status: 400 });
     }
-    if (date < profile.dob) {
+    if (date < child.dob) {
       return NextResponse.json({ error: 'วันที่รับวัคซีนต้องไม่ก่อนวันเกิด' }, { status: 400 });
     }
 
     const existingRecord = await prisma.vaccineRecord.findFirst({
       where: {
         userId: session.userId,
+        childId: child.id,
         vaccineCode,
         verificationStatus: { in: ['PENDING', 'VERIFIED'] },
       },
@@ -69,6 +84,7 @@ export async function POST(req: Request) {
     const record = await prisma.vaccineRecord.create({
       data: {
         userId: session.userId,
+        childId: child.id,
         vaccineCode,
         vaccineName: `${vaccine.name} ${vaccine.dose}`,
         administeredDate: date,

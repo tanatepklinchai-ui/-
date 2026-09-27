@@ -22,6 +22,7 @@ model User {
   role         Role            @default(USER)
   createdAt    DateTime        @default(now())
   profile      Profile?
+  children     Child[]
   appointments Appointment[]
   vaccineRecords VaccineRecord[]
 }
@@ -37,6 +38,24 @@ model Profile {
   height    Float?
   dob       DateTime?
   updatedAt DateTime  @updatedAt
+}
+
+model Child {
+  id             String           @id @default(uuid())
+  userId         String
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  firstName      String?
+  lastName       String?
+  gender         String?
+  weight         Float?
+  height         Float?
+  dob            DateTime?
+  appointments   Appointment[]
+  vaccineRecords VaccineRecord[]
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@index([userId])
 }
 
 // ------------------------------------------------------
@@ -75,6 +94,8 @@ model Appointment {
   id           String    @id @default(uuid())
   userId       String
   user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  childId      String
+  child        Child     @relation(fields: [childId], references: [id], onDelete: Restrict)
   
   // เชื่อมความสัมพันธ์กับตาราง Hospital ของจริง
   hospitalId   String?   
@@ -93,6 +114,8 @@ model VaccineRecord {
   id               String   @id @default(uuid())
   userId           String
   user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  childId          String
+  child            Child    @relation(fields: [childId], references: [id], onDelete: Restrict)
   vaccineName      String
   vaccineCode      String?
   administeredDate DateTime

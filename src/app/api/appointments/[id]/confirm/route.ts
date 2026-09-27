@@ -1,6 +1,7 @@
 // src/app/api/appointments/[id]/confirm/route.ts
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getSession } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,6 +9,11 @@ export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await getSession();
+  if (!session || session.role !== 'ADMIN') {
+    return NextResponse.json({ error: 'เฉพาะเจ้าหน้าที่ที่ได้รับอนุญาตเท่านั้น' }, { status: 403 });
+  }
+
   try {
     const { id } = await params;
     
@@ -21,6 +27,9 @@ export async function POST(
     if (!appointment || appointment.status !== 'PENDING') {
       return NextResponse.json({ error: 'ไม่พบรายการนัดหมายหรือคิวถูกปิดแล้ว' }, { status: 400 });
     }
+    if (!appointment.childId) {
+      return NextResponse.json({ error: 'นัดหมายนี้ยังไม่ได้ผูกกับข้อมูลเด็ก' }, { status: 409 });
+    }
 
     // 1. อัปเดตสถานะนัดหมายเป็น COMPLETED (ฉีดเรียบร้อย)
     const updatedAppointment = await prisma.appointment.update({
@@ -32,10 +41,12 @@ export async function POST(
     await prisma.vaccineRecord.create({
       data: {
         userId: appointment.userId,
+        childId: appointment.childId,
         vaccineName: body.vaccineName || 'วัคซีนตามเกณฑ์กระทรวงฯ',
         administeredDate: new Date(),
         hospitalName: appointment.hospitalName,
-        source: 'APP_CONFIRM', // ระบุแหล่งที่มาว่ามาจากการกดยืนยันในแอปพลิเคชัน
+        source: 'CLINICIAN_VERIFIED',
+        verificationStatus: 'VERIFIED',
       },
     });
 

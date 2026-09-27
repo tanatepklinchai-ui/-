@@ -3,22 +3,27 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth'; // นำเข้า getSession
 export const dynamic = 'force-dynamic';
-export async function GET() {
+export async function GET(req: Request) {
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: 'กรุณาเข้าสู่ระบบก่อนใช้งาน' }, { status: 401 });
   }
 
-  const profile = await prisma.profile.findUnique({
-    where: { userId: session.userId },
-  });
+  const childId = new URL(req.url).searchParams.get('childId');
+  if (!childId) {
+    return NextResponse.json({ error: 'กรุณาระบุ childId' }, { status: 400 });
+  }
 
-  const vaccines = await prisma.vaccineRecord.findMany({
-    where: { userId: session.userId },
-    orderBy: { administeredDate: 'desc' },
+  const child = await prisma.child.findFirst({
+    where: { id: childId, userId: session.userId },
+    include: { vaccineRecords: { orderBy: { administeredDate: 'desc' } } },
   });
+  if (!child) {
+    return NextResponse.json({ error: 'ไม่พบข้อมูลเด็ก' }, { status: 404 });
+  }
 
-  return NextResponse.json({ profile, vaccines });
+  const { vaccineRecords, ...profile } = child;
+  return NextResponse.json({ profile, vaccines: vaccineRecords });
 }
 
 export async function POST(req: Request) {
@@ -34,44 +39,47 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'ข้อมูลโปรไฟล์ไม่ถูกต้อง' }, { status: 400 });
   }
 
-  const dob = typeof data.dob === 'string' ? new Date(data.dob) : null;
-  if (!dob || !Number.isFinite(dob.getTime()) || dob > new Date()) {
-    return NextResponse.json({ error: 'กรุณาระบุวันเกิดที่ถูกต้อง' }, { status: 400 });
+  const { childId, firstName, lastName, gender, dob, weight, height } = data;
+  const birthDate = typeof dob === 'string' ? new Date(dob) : null;
+  const parsedWeight = parseMeasurement(weight);
+  const parsedHeight = parseMeasurement(height);
+  if (
+    typeof childId !== 'string' ||
+    !birthDate || !Number.isFinite(birthDate.getTime()) || birthDate > new Date() ||
+    parsedWeight === undefined || parsedHeight === undefined ||
+    (firstName !== undefined && typeof firstName !== 'string') ||
+    (lastName !== undefined && typeof lastName !== 'string') ||
+    (gender !== undefined && typeof gender !== 'string')
+  ) {
+    return NextResponse.json({ error: 'ข้อมูลโปรไฟล์ไม่ถูกต้อง' }, { status: 400 });
   }
 
-  const parseOptionalNumber = (value: unknown) => {
-    if (value === undefined) return undefined;
-    if (value === null || value === '') return null;
-    const numberValue = typeof value === 'number' ? value : Number(value);
-    return Number.isFinite(numberValue) && numberValue > 0 ? numberValue : null;
-  };
+  const child = await prisma.child.findFirst({
+    where: { id: childId, userId: session.userId },
+    select: { id: true },
+  });
+  if (!child) {
+    return NextResponse.json({ error: 'ไม่พบข้อมูลเด็ก' }, { status: 404 });
+  }
 
-  const firstName = typeof data.firstName === 'string' ? data.firstName.trim() : undefined;
-  const lastName = typeof data.lastName === 'string' ? data.lastName.trim() : undefined;
-  const gender = typeof data.gender === 'string' ? data.gender : undefined;
-  const weight = parseOptionalNumber(data.weight);
-  const height = parseOptionalNumber(data.height);
-
-  const profile = await prisma.profile.upsert({
-    where: { userId: session.userId },
-    update: {
-      firstName,
-      lastName,
-      gender,
-      weight,
-      height,
-      dob,
-    },
-    create: {
-      userId: session.userId,
-      firstName: firstName ?? null,
-      lastName: lastName ?? null,
-      gender: gender ?? null,
-      weight: weight ?? null,
-      height: height ?? null,
-      dob,
+  const profile = await prisma.child.update({
+    where: { id: childId },
+    data: {
+      firstName: typeof firstName === 'string' ? firstName.trim() || null : null,
+      lastName: typeof lastName === 'string' ? lastName.trim() || null : null,
+      gender: typeof gender === 'string' ? gender : null,
+      weight: parsedWeight,
+      height: parsedHeight,
+      dob: birthDate,
     },
   });
 
   return NextResponse.json({ success: true, profile });
+}
+
+function parseMeasurement(value: unknown): number | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || value === '') return null;
+  const parsedValue = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : undefined;
 }
