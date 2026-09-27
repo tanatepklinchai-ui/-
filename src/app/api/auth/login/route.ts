@@ -39,7 +39,7 @@ export async function POST(req: Request) {
         role: user.role,
       },
     });
-  } catch (error: any) {
+  } catch {
     return NextResponse.json({ error: 'เกิดข้อผิดพลาดของเซิร์ฟเวอร์' }, { status: 500 });
   }
 }

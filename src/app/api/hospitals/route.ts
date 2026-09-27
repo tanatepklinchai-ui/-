@@ -210,7 +210,7 @@ export async function GET(req: Request) {
     });
     const slotsByHospitalId = new Map(hospitalsWithSlots.map((hospital) => {
       const dateGroups = new Map<string, { date: string; dateString: string; slots: string[] }>();
-      hospital.slots.filter((slot) => slot.booked < slot.capacity).forEach((slot) => {
+      hospital.slots.filter((slot) => !slot.isClosed && slot.booked < slot.capacity).forEach((slot) => {
         const dateString = slot.date.toISOString().slice(0, 10);
         const group = dateGroups.get(dateString) ?? {
           date: formatSlotDate(slot.date),

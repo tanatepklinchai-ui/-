@@ -129,7 +129,7 @@ export async function POST(req: Request) {
       }
 
       const reservation = await transaction.hospitalSlot.updateMany({
-        where: { id: slot.id, booked: { lt: slot.capacity } },
+        where: { id: slot.id, isClosed: false, booked: { lt: slot.capacity } },
         data: { booked: { increment: 1 } },
       });
       if (reservation.count !== 1) {
@@ -182,7 +182,7 @@ export async function PATCH(req: Request) {
       const currentAppointment = await transaction.appointment.findFirst({
         where: { id: appointmentId, userId: session.userId },
       });
-      if (!currentAppointment || currentAppointment.status !== 'PENDING') {
+      if (!currentAppointment || !['PENDING', 'CONFIRMED'].includes(currentAppointment.status)) {
         throw new AppointmentRequestError('ไม่พบนัดหมายหรือไม่สามารถแก้ไขนัดหมายนี้ได้', 404);
       }
 
@@ -230,7 +230,7 @@ export async function PATCH(req: Request) {
         }
 
         const reservation = await transaction.hospitalSlot.updateMany({
-          where: { id: targetSlot.id, booked: { lt: targetSlot.capacity } },
+          where: { id: targetSlot.id, isClosed: false, booked: { lt: targetSlot.capacity } },
           data: { booked: { increment: 1 } },
         });
         if (reservation.count !== 1) {

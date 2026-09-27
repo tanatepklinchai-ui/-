@@ -2,10 +2,11 @@
 import { cookies } from 'next/headers';
 import crypto from 'crypto';
 
-const SECRET = process.env.NEXTAUTH_SECRET || 'promchid_secret_key_2026';
+const SECRET = process.env.NEXTAUTH_SECRET;
 
 // สร้าง Signature เพื่อป้องกันไม่ให้ผู้ใช้แอบแก้ไขข้อมูลใน Cookie เอง
 function sign(value: string): string {
+  if (!SECRET) throw new Error('NEXTAUTH_SECRET must be configured');
   return crypto.createHmac('sha256', SECRET).update(value).digest('hex');
 }
 

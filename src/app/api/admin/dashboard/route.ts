@@ -75,27 +75,6 @@ export async function GET() {
   }
 }
 
-// API สำหรับแอดมินแก้ไขข้อมูลนัดหมาย
-export async function PATCH(req: Request) {
-  const session = await getSession();
-  if (!session || session.role !== 'ADMIN') {
-    return NextResponse.json({ error: 'ไม่มีสิทธิ์ดำเนินการนี้' }, { status: 403 });
-  }
-
-  try {
-    const { appointmentId, hospitalName, scheduledAt, status } = await req.json();
-
-    const updated = await prisma.appointment.update({
-      where: { id: appointmentId },
-      data: {
-        ...(hospitalName && { hospitalName }),
-        ...(scheduledAt && { scheduledAt: new Date(scheduledAt) }),
-        ...(status && { status }),
-      },
-    });
-
-    return NextResponse.json({ success: true, appointment: updated });
-  } catch (error: unknown) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'ไม่สามารถแก้ไขนัดหมายได้' }, { status: 500 });
-  }
-}
+// Appointment changes belong to /api/admin/appointments to preserve slot capacity.
+// Admin access is enforced by the session role on this route.
+// This handler intentionally exposes read-only dashboard data.

@@ -14,7 +14,7 @@ export async function GET() {
     const oneDayEnd = new Date(now.getTime() + 25 * 60 * 60 * 1000);
     const appts1Day = await prisma.appointment.findMany({
       where: {
-        status: 'PENDING',
+        status: { in: ['PENDING', 'CONFIRMED'] },
         notified1Day: false,
         scheduledAt: { gte: oneDayStart, lte: oneDayEnd }, // แก้เป็น scheduledAt
       },
@@ -47,7 +47,7 @@ export async function GET() {
     const oneHourEnd = new Date(now.getTime() + 70 * 60 * 1000);
     const appts1Hour = await prisma.appointment.findMany({
       where: {
-        status: 'PENDING',
+        status: { in: ['PENDING', 'CONFIRMED'] },
         notified1Hour: false,
         scheduledAt: { gte: oneHourStart, lte: oneHourEnd }, // แก้เป็น scheduledAt
       },
@@ -76,22 +76,52 @@ export async function GET() {
 
     // 3. เคลียร์คิวที่เลยกำหนดเกิน 1 ชั่วโมง (ไม่บันทึกประวัติวัคซีน)
     const expiredThreshold = new Date(now.getTime() - 60 * 60 * 1000);
-    const expiredAppointments = await prisma.appointment.updateMany({
+    const expiredAppointments = await prisma.appointment.findMany({
       where: {
-        status: 'PENDING',
+        status: { in: ['PENDING', 'CONFIRMED'] },
         scheduledAt: { lt: expiredThreshold }, // แก้เป็น scheduledAt
       },
-      data: { status: 'EXPIRED' },
     });
+    let expiredCount = 0;
+    for (const appointment of expiredAppointments) {
+      const expired = await prisma.$transaction(async (transaction) => {
+        const result = await transaction.appointment.updateMany({
+          where: { id: appointment.id, status: appointment.status },
+          data: { status: 'EXPIRED' },
+        });
+        if (result.count !== 1) return false;
+
+        if (appointment.hospitalId) {
+          const timeParts = new Intl.DateTimeFormat('en', {
+            timeZone: 'Asia/Bangkok',
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+          }).formatToParts(appointment.scheduledAt);
+          const values = Object.fromEntries(timeParts.map(({ type, value }) => [type, value]));
+          const slotDate = new Date(Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day)));
+          await transaction.hospitalSlot.updateMany({
+            where: {
+              hospitalId: appointment.hospitalId,
+              date: slotDate,
+              time: `${values.hour}:${values.minute}`,
+              booked: { gt: 0 },
+            },
+            data: { booked: { decrement: 1 } },
+          });
+        }
+        return true;
+      });
+      if (expired) expiredCount += 1;
+    }
 
     return NextResponse.json({
       success: true,
       notified1DayCount: appts1Day.length,
       notified1HourCount: appts1Hour.length,
-      expiredCount: expiredAppointments.count,
+      expiredCount,
     });
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Process queue error:', error);
     return NextResponse.json(
       { success: false, error: 'เกิดข้อผิดพลาดในการรันคิวแจ้งเตือน' },

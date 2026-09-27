@@ -1,9 +1,12 @@
-// src/app/api/appointments/[id]/confirm/route.ts
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
+
+class CompletionError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
 
 export async function POST(
   req: Request,
@@ -16,43 +19,54 @@ export async function POST(
 
   try {
     const { id } = await params;
-    
-    // รับค่าชื่อวัคซีนที่ผู้ใช้กรอกเข้ามาตอนกดยืนยัน (ถ้ามี)
-    const body = await req.json().catch(() => ({}));
-
-    const appointment = await prisma.appointment.findUnique({
-      where: { id },
-    });
-
-    if (!appointment || appointment.status !== 'PENDING') {
-      return NextResponse.json({ error: 'ไม่พบรายการนัดหมายหรือคิวถูกปิดแล้ว' }, { status: 400 });
-    }
-    if (!appointment.childId) {
-      return NextResponse.json({ error: 'นัดหมายนี้ยังไม่ได้ผูกกับข้อมูลเด็ก' }, { status: 409 });
+    const body = await req.json();
+    const vaccineCatalogId = body?.vaccineCatalogId;
+    if (typeof vaccineCatalogId !== 'string') {
+      return NextResponse.json({ error: 'กรุณาเลือกวัคซีนจากรายการและตรวจสอบสต็อก' }, { status: 400 });
     }
 
-    // 1. อัปเดตสถานะนัดหมายเป็น COMPLETED (ฉีดเรียบร้อย)
-    const updatedAppointment = await prisma.appointment.update({
-      where: { id },
-      data: { status: 'COMPLETED' },
+    const appointment = await prisma.$transaction(async (transaction) => {
+      const current = await transaction.appointment.findUnique({ where: { id } });
+      if (!current || !['PENDING', 'CONFIRMED'].includes(current.status)) {
+        throw new CompletionError('ไม่พบคิวหรือคิวนี้ไม่ได้อยู่ในสถานะรอมารับบริการ', 409);
+      }
+
+      const statusUpdate = await transaction.appointment.updateMany({
+        where: { id, status: current.status },
+        data: { status: 'COMPLETED' },
+      });
+      if (statusUpdate.count !== 1) throw new CompletionError('คิวมีการเปลี่ยนแปลง กรุณาโหลดใหม่', 409);
+
+      const stockUpdate = await transaction.vaccineCatalog.updateMany({
+        where: { id: vaccineCatalogId, isActive: true, stock: { gt: 0 } },
+        data: { stock: { decrement: 1 } },
+      });
+      if (stockUpdate.count !== 1) throw new CompletionError('วัคซีนหมดสต็อกหรือปิดใช้งานแล้ว', 409);
+
+      const vaccine = await transaction.vaccineCatalog.findUnique({ where: { id: vaccineCatalogId } });
+      if (!vaccine) throw new CompletionError('ไม่พบวัคซีนที่เลือก', 404);
+
+      await transaction.vaccineRecord.create({
+        data: {
+          userId: current.userId,
+          childId: current.childId,
+          vaccineCatalogId: vaccine.id,
+          vaccineCode: vaccine.code,
+          vaccineName: vaccine.name,
+          administeredDate: new Date(),
+          hospitalName: current.hospitalName,
+          source: 'CLINICIAN_VERIFIED',
+          verificationStatus: 'VERIFIED',
+        },
+      });
+      return transaction.appointment.findUnique({ where: { id } });
     });
 
-    // 2. บันทึกข้อมูลลงตาราง VaccineRecord ตามโครงสร้างฐานข้อมูลของคุณ
-    await prisma.vaccineRecord.create({
-      data: {
-        userId: appointment.userId,
-        childId: appointment.childId,
-        vaccineName: body.vaccineName || 'วัคซีนตามเกณฑ์กระทรวงฯ',
-        administeredDate: new Date(),
-        hospitalName: appointment.hospitalName,
-        source: 'CLINICIAN_VERIFIED',
-        verificationStatus: 'VERIFIED',
-      },
-    });
-
-    return NextResponse.json({ success: true, appointment: updatedAppointment });
+    return NextResponse.json({ success: true, appointment });
   } catch (error) {
-    console.error("Confirm error:", error);
-    return NextResponse.json({ error: 'เกิดข้อผิดพลาดในการยืนยันและบันทึกประวัติ' }, { status: 500 });
+    if (error instanceof CompletionError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    return NextResponse.json({ error: 'เกิดข้อผิดพลาดในการยืนยันการฉีดและตัดสต็อก' }, { status: 500 });
   }
 }

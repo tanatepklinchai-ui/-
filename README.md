@@ -16,6 +16,23 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## Environment Configuration
+
+Set these values in `.env` for local development and in the deployment platform's environment settings for production:
+
+```env
+DATABASE_URL="your-postgresql-connection-string"
+NEXTAUTH_SECRET="a-long-random-secret"
+NEXTAUTH_URL="http://localhost:3000"
+ADMIN_EMAIL="authorized-admin@example.com"
+ADMIN_REGISTRATION_CODE="a-private-admin-registration-code"
+RESEND_API_KEY="your-resend-api-key"
+```
+
+Keep secret values out of source control. Admin registration only grants the `ADMIN` role when both the email and registration code match the server-side environment values. Admin APIs also verify the signed session and role.
+
+For a new database, run `npx prisma migrate deploy` before deploying the app. The existing database was baselined at `20260927000000_init`; later schema changes should be added as new Prisma migrations.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

@@ -33,8 +33,8 @@ export default function LoginPage() {
       } else {
         router.push('/user/dashboard');
       }
-    } catch (err: any) {
-      setError(err.message || 'เข้าสู่ระบบไม่สำเร็จ กรุณาตรวจสอบข้อมูลอีกครั้ง');
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'เข้าสู่ระบบไม่สำเร็จ กรุณาตรวจสอบข้อมูลอีกครั้ง');
     } finally {
       setLoading(false);
     }
@@ -57,7 +57,7 @@ export default function LoginPage() {
           <div className="mx-auto w-16 h-16 bg-gradient-to-tr from-teal-400 to-teal-300 rounded-2xl flex items-center justify-center text-white font-extrabold text-3xl shadow-lg shadow-teal-200 mb-5 transform -rotate-3 hover:rotate-0 transition-transform duration-300">
             พ
           </div>
-          <h1 className="text-2xl font-extrabold text-slate-800 tracking-tight">เข้าสู่ระบบ "พร้อมฉีด"</h1>
+          <h1 className="text-2xl font-extrabold text-slate-800 tracking-tight">เข้าสู่ระบบ &quot;พร้อมฉีด&quot;</h1>
           <p className="text-sm text-slate-500 mt-2 font-medium">แอปพลิเคชันจัดการและนัดหมายวัคซีน</p>
         </div>
 

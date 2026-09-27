@@ -21,8 +21,11 @@ export async function POST(req: Request) {
       );
     }
 
-    // 2. มอบสิทธิ์ ADMIN ตามเงื่อนไขที่กำหนด
-    const role = (email === 'poomg900@gmail.com' && adminCode === 'admin0399')
+    // Admin registration requires deployment-only environment configuration.
+    const configuredAdminEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
+    const configuredAdminCode = process.env.ADMIN_REGISTRATION_CODE;
+    const role = configuredAdminEmail && configuredAdminCode &&
+      email.trim().toLowerCase() === configuredAdminEmail && adminCode === configuredAdminCode
       ? 'ADMIN'
       : 'USER';
 
@@ -46,7 +49,10 @@ export async function POST(req: Request) {
       },
       { status: 201 }
     );
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message || 'เกิดข้อผิดพลาดในการลงทะเบียน' }, { status: 500 });
+  } catch (error: unknown) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'เกิดข้อผิดพลาดในการลงทะเบียน' },
+      { status: 500 }
+    );
   }
 }

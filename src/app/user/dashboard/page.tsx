@@ -887,7 +887,7 @@ export default function ColorfulDashboard() {
                 ) : (
                   <div className="space-y-4">
                     {appointments.map((appointment) => {
-                      const isPending = appointment.status === 'PENDING';
+                      const canManage = ['PENDING', 'CONFIRMED'].includes(appointment.status);
                       const currentSlotKey = getBangkokSlotKey(appointment.scheduledAt);
                       const editableSlots = appointment.hospital?.slots.filter((slot) =>
                         slot.booked < slot.capacity ||
@@ -905,7 +905,7 @@ export default function ColorfulDashboard() {
                         <article key={appointment.id} className="p-4 rounded-2xl border-2 border-indigo-50 bg-indigo-50/20">
                           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                             <div>
-                              <span className={`text-xs font-bold px-3 py-1 rounded-full ${isPending ? 'bg-amber-100 text-amber-700' : appointment.status === 'CANCELLED' ? 'bg-slate-100 text-slate-600' : 'bg-emerald-100 text-emerald-700'}`}>
+                              <span className={`text-xs font-bold px-3 py-1 rounded-full ${appointment.status === 'PENDING' ? 'bg-amber-100 text-amber-700' : appointment.status === 'CONFIRMED' ? 'bg-sky-100 text-sky-700' : appointment.status === 'CANCELLED' ? 'bg-slate-100 text-slate-600' : 'bg-emerald-100 text-emerald-700'}`}>
                                 {statusLabel}
                               </span>
                               <h4 className="font-bold text-slate-800 text-base mt-2">{appointment.hospitalName}</h4>
@@ -913,7 +913,7 @@ export default function ColorfulDashboard() {
                                 📅 {new Date(appointment.scheduledAt).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' })} น.
                               </p>
                             </div>
-                            {isPending && editingAppointmentId !== appointment.id && (
+                            {canManage && editingAppointmentId !== appointment.id && (
                               <div className="flex items-center gap-2 w-full sm:w-auto">
                                 <button
                                   onClick={() => {
@@ -934,7 +934,7 @@ export default function ColorfulDashboard() {
                               </div>
                             )}
                           </div>
-                          {editingAppointmentId === appointment.id && (
+                          {editingAppointmentId === appointment.id && canManage && (
                             <div className="mt-4 flex flex-col sm:flex-row gap-2">
                               <select
                                 value={editSlotKey}

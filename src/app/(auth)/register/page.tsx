@@ -27,8 +27,8 @@ export default function RegisterPage() {
       if (!res.ok) throw new Error(data.error);
 
       router.push('/login');
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการลงทะเบียน');
     } finally {
       setLoading(false);
     }
@@ -51,7 +51,7 @@ export default function RegisterPage() {
           <div className="mx-auto w-16 h-16 bg-gradient-to-tr from-teal-400 to-teal-300 rounded-2xl flex items-center justify-center text-white font-extrabold text-3xl shadow-lg shadow-teal-200 mb-5 transform -rotate-3 hover:rotate-0 transition-transform duration-300">
             พ
           </div>
-          <h1 className="text-2xl font-extrabold text-slate-800 tracking-tight">สร้างบัญชี "พร้อมฉีด"</h1>
+          <h1 className="text-2xl font-extrabold text-slate-800 tracking-tight">สร้างบัญชี &quot;พร้อมฉีด&quot;</h1>
           <p className="text-sm text-slate-500 mt-2 font-medium">ระบบบันทึกและแจ้งเตือนการรับวัคซีน</p>
         </div>
 
@@ -107,21 +107,18 @@ export default function RegisterPage() {
             />
           </div>
 
-          {/* ช่องกรอกรหัส Admin (จะแสดงเมื่อกรอกอีเมลตรงตามเงื่อนไข) */}
-          {form.email === 'poomg900@gmail.com' && (
-            <div className="animate-fade-in-up">
-              <label className="block text-xs font-bold text-amber-600 uppercase tracking-wider mb-2">
-                รหัสยืนยันสิทธิ์ Admin
-              </label>
-              <input
-                type="password"
-                value={form.adminCode}
-                onChange={(e) => setForm({ ...form, adminCode: e.target.value })}
-                className="w-full px-5 py-3.5 rounded-2xl border-2 border-amber-200 bg-amber-50/50 text-slate-800 text-sm font-medium placeholder:text-amber-300 focus:outline-none focus:border-amber-400 focus:ring-4 focus:ring-amber-100/50 transition-all"
-                placeholder="กรอกรหัสยืนยันผู้ดูแลระบบ"
-              />
-            </div>
-          )}
+          <div className="animate-fade-in-up">
+            <label className="block text-xs font-bold text-amber-600 uppercase tracking-wider mb-2">
+              รหัสผู้ดูแลระบบ (ถ้ามี)
+            </label>
+            <input
+              type="password"
+              value={form.adminCode}
+              onChange={(e) => setForm({ ...form, adminCode: e.target.value })}
+              className="w-full px-5 py-3.5 rounded-2xl border-2 border-amber-200 bg-amber-50/50 text-slate-800 text-sm font-medium placeholder:text-amber-300 focus:outline-none focus:border-amber-400 focus:ring-4 focus:ring-amber-100/50 transition-all"
+              placeholder="ใช้ได้เฉพาะผู้ดูแลระบบที่ได้รับอนุญาต"
+            />
+          </div>
 
           <div className="pt-4">
             <button
