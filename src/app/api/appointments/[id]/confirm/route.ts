@@ -1,40 +1,35 @@
 // src/app/api/appointments/[id]/confirm/route.ts
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+
 export const dynamic = 'force-dynamic';
-export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
+
+export async function POST(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
   try {
     const { id } = await params;
-    const { vaccineName } = await req.json();
+    // รับค่าจากหน้าเว็บมา (เผื่อนำไปใช้ในอนาคตเมื่อฐานข้อมูลพร้อม)
+    const body = await req.json();
 
     const appointment = await prisma.appointment.findUnique({
       where: { id },
-      include: { user: true },
     });
 
     if (!appointment || appointment.status !== 'PENDING') {
-      return NextResponse.json({ error: 'ไม่พบคิวที่รอดำเนินการ' }, { status: 404 });
+      return NextResponse.json({ error: 'ไม่พบรายการนัดหมายหรือคิวถูกปิดแล้ว' }, { status: 400 });
     }
 
-    // 1. อัปเดตสถานะคิวนัดเป็น CONFIRMED
-    await prisma.appointment.update({
+    // อัปเดตแค่สถานะเป็นฉีดแล้ว (ตัดการบันทึก VaccineHistory ออกชั่วคราวเพราะ DB ยังไม่มีตารางนี้)
+    const updatedAppointment = await prisma.appointment.update({
       where: { id },
-      data: { status: 'CONFIRMED' },
+      data: { status: 'COMPLETED' },
     });
 
-    // 2. บันทึกเข้าตาราง VaccineRecord อัตโนมัติ
-    await prisma.vaccineRecord.create({
-      data: {
-        userId: appointment.userId,
-        vaccineName: vaccineName || 'วัคซีนตามนัดหมาย',
-        administeredDate: new Date(),
-        hospitalName: appointment.hospitalName,
-        source: 'USER_CONFIRMED',
-      },
-    });
-
-    return NextResponse.json({ success: true, message: 'บันทึกประวัติการฉีดสำเร็จ' });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ success: true, appointment: updatedAppointment });
+  } catch (error) {
+    console.error("Confirm error:", error);
+    return NextResponse.json({ error: 'เกิดข้อผิดพลาดในการยืนยัน' }, { status: 500 });
   }
 }

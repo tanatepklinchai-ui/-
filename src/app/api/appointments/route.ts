@@ -1,60 +1,39 @@
+// src/app/api/appointments/route.ts
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
 
-export async function POST(
-  req: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
+// ดึงรายการนัดหมาย
+export async function GET() {
   try {
-    const { id } = await params;
+    const appointments = await prisma.appointment.findMany({
+      orderBy: { scheduledAt: 'asc' }
+    });
+    return NextResponse.json({ appointments });
+  } catch (error) {
+    return NextResponse.json({ error: 'Failed to fetch appointments' }, { status: 500 });
+  }
+}
+
+// สร้างนัดหมายใหม่
+export async function POST(req: Request) {
+  try {
     const body = await req.json();
+    const { hospitalName, scheduledAt } = body;
 
-    const appointment = await prisma.appointment.findUnique({
-      where: { id },
-      include: { user: true },
-    });
-
-    if (!appointment || appointment.status !== 'PENDING') {
-      return NextResponse.json({ error: 'ไม่พบรายการนัดหมายหรือคิวถูกปิดแล้ว' }, { status: 400 });
-    }
-
-    // 1. เปลี่ยนสถานะนัดหมายเป็น COMPLETED
-    const updatedAppointment = await prisma.appointment.update({
-      where: { id },
-      data: { status: 'COMPLETED' },
-    });
-
-    // 2. บันทึกลงตารางประวัติวัคซีน (VaccineHistory)
-    // The generated Prisma client does not expose this delegate in the current schema.
-    // Keep the operation typed locally until the client is regenerated with VaccineHistory.
-    const vaccineHistory = (prisma as unknown as {
-      vaccineHistory: {
-        create: (args: {
-          data: {
-            userId: string;
-            vaccineName: string;
-            vaccineType: string;
-            hospitalName: string;
-            vaccinatedAt: Date;
-          };
-        }) => Promise<unknown>;
-      };
-    }).vaccineHistory;
-
-    await vaccineHistory.create({
+    const newAppointment = await prisma.appointment.create({
       data: {
-        userId: appointment.userId,
-        vaccineName: body.vaccineName || 'วัคซีนทั่วไป',
-        vaccineType: body.vaccineType || 'วัคซีนทั่วไป',
-        hospitalName: appointment.hospitalName,
-        vaccinatedAt: new Date(),
+        hospitalName,
+        scheduledAt: new Date(scheduledAt),
+        status: 'PENDING',
+        // สมมติฐาน: เชื่อมกับ user คนที่ล็อกอินอยู่ (ปรับแก้ userId ตามระบบ Auth ของคุณ)
+        userId: "ID_ของผู้ใช้งาน" 
       },
     });
 
-    return NextResponse.json({ success: true, appointment: updatedAppointment });
+    return NextResponse.json({ success: true, appointment: newAppointment });
   } catch (error) {
-    return NextResponse.json({ error: 'เกิดข้อผิดพลาดในการยืนยัน' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to create appointment' }, { status: 500 });
   }
 }
