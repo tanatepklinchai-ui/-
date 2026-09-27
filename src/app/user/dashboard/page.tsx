@@ -1,14 +1,57 @@
 // src/app/user/dashboard/page.tsx
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+
+type HospitalOption = {
+  id: string;
+  name: string;
+  distance: string;
+  availableDates: { date: string; dateString: string; slots: string[] }[];
+};
+
+type Appointment = {
+  id: string;
+  hospitalName: string;
+  scheduledAt: string;
+  status: string;
+};
+
+function toDateTimeInputValue(value: string | Date) {
+  const date = new Date(value);
+  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return localDate.toISOString().slice(0, 16);
+}
 
 export default function ColorfulDashboard() {
   const [activeTab, setActiveTab] = useState<'overview' | 'appointments' | 'schedule' | 'tips'>('overview');
   const [isLocating, setIsLocating] = useState(false);
   const [selectedHospital, setSelectedHospital] = useState<string | null>(null);
-  const [selectedDateSlot, setSelectedDateSlot] = useState<{date: string, time: string} | null>(null);
-  const [realHospitals, setRealHospitals] = useState<any[]>([]);
+  const [selectedDateSlot, setSelectedDateSlot] = useState<{date: string, dateString: string, time: string} | null>(null);
+  const [realHospitals, setRealHospitals] = useState<HospitalOption[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [appointmentsLoading, setAppointmentsLoading] = useState(true);
+  const [appointmentError, setAppointmentError] = useState('');
+  const [isSavingAppointment, setIsSavingAppointment] = useState(false);
+  const [editingAppointmentId, setEditingAppointmentId] = useState<string | null>(null);
+  const [editScheduledAt, setEditScheduledAt] = useState('');
+
+  useEffect(() => {
+    const loadAppointments = async () => {
+      try {
+        const response = await fetch('/api/appointments');
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'ไม่สามารถดึงข้อมูลนัดหมายได้');
+        setAppointments(data.appointments);
+      } catch (error) {
+        setAppointmentError(error instanceof Error ? error.message : 'ไม่สามารถดึงข้อมูลนัดหมายได้');
+      } finally {
+        setAppointmentsLoading(false);
+      }
+    };
+
+    void loadAppointments();
+  }, []);
 
   // ข้อมูลตารางวัคซีน อ้างอิงจากแผนงาน สธ. ปี 2569
   const vaccineHistory = [
@@ -74,15 +117,83 @@ export default function ColorfulDashboard() {
     );
   };
 
-  const handleBooking = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleBooking = async () => {
     if (!selectedHospital || !selectedDateSlot) {
       alert('กรุณาเลือกโรงพยาบาลและเวลาที่ต้องการนัดหมาย');
       return;
     }
-    alert(`🎉 นัดหมายสำเร็จ! ระบบได้บันทึกคิวและส่งการแจ้งเตือนไปยังอีเมลของคุณเรียบร้อยแล้ว`);
-    setSelectedHospital(null);
-    setSelectedDateSlot(null);
+
+    const hospital = realHospitals.find((item) => item.id === selectedHospital);
+    if (!hospital) return;
+
+    setIsSavingAppointment(true);
+    setAppointmentError('');
+    try {
+      const scheduledAt = new Date(`${selectedDateSlot.dateString}T${selectedDateSlot.time}:00`);
+      const response = await fetch('/api/appointments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hospitalName: hospital.name, scheduledAt: scheduledAt.toISOString() }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'ไม่สามารถบันทึกนัดหมายได้');
+
+      setAppointments((current) => [...current, data.appointment].sort(
+        (a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime()
+      ));
+      setSelectedHospital(null);
+      setSelectedDateSlot(null);
+      alert('🎉 บันทึกนัดหมายเรียบร้อยแล้ว');
+    } catch (error) {
+      setAppointmentError(error instanceof Error ? error.message : 'ไม่สามารถบันทึกนัดหมายได้');
+    } finally {
+      setIsSavingAppointment(false);
+    }
+  };
+
+  const handleCancelAppointment = async (appointmentId: string) => {
+    if (!confirm('คุณต้องการยกเลิกการนัดหมายนี้ใช่หรือไม่?')) return;
+
+    try {
+      const response = await fetch('/api/appointments', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ appointmentId, status: 'CANCELLED' }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'ไม่สามารถยกเลิกนัดหมายได้');
+      setAppointments((current) => current.map((appointment) =>
+        appointment.id === appointmentId ? data.appointment : appointment
+      ));
+    } catch (error) {
+      setAppointmentError(error instanceof Error ? error.message : 'ไม่สามารถยกเลิกนัดหมายได้');
+    }
+  };
+
+  const handleRescheduleAppointment = async (appointmentId: string) => {
+    const scheduledAt = new Date(editScheduledAt);
+    if (!Number.isFinite(scheduledAt.getTime()) || scheduledAt <= new Date()) {
+      setAppointmentError('กรุณาเลือกวันและเวลาในอนาคต');
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/appointments', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ appointmentId, scheduledAt: scheduledAt.toISOString() }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'ไม่สามารถเปลี่ยนเวลานัดหมายได้');
+      setAppointments((current) => current.map((appointment) =>
+        appointment.id === appointmentId ? data.appointment : appointment
+      ));
+      setEditingAppointmentId(null);
+      setEditScheduledAt('');
+      setAppointmentError('');
+    } catch (error) {
+      setAppointmentError(error instanceof Error ? error.message : 'ไม่สามารถเปลี่ยนเวลานัดหมายได้');
+    }
   };
 
   return (
@@ -244,97 +355,190 @@ export default function ColorfulDashboard() {
             </section>
           )}
 
-          {/* TAB 3: APPOINTMENTS (ระบบจองคิว & โรงพยาบาลใกล้ฉัน) */}
+          {/* TAB 3: APPOINTMENTS (ระบบจองคิว & รายการนัดหมายของคุณ) */}
           {activeTab === 'appointments' && (
-            <section className="bg-white rounded-3xl p-6 md:p-8 shadow-xl shadow-rose-100/50 border-t-4 border-rose-400 animate-fade-in">
-              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
-                <div>
-                  <h2 className="text-2xl font-extrabold text-rose-900">📅 นัดหมายรับวัคซีน</h2>
-                  <p className="text-sm text-slate-500 mt-1">ค้นหาโรงพยาบาลใกล้ฉันด้วย GPS และเลือกช่วงเวลาที่สะดวก</p>
-                </div>
-                <button 
-                  onClick={handleFindNearby}
-                  disabled={isLocating}
-                  className="flex items-center gap-2 bg-rose-50 hover:bg-rose-100 text-rose-600 px-4 py-2.5 rounded-xl font-bold text-sm transition-all border border-rose-200 w-full md:w-auto justify-center"
-                >
-                  {isLocating ? (
-                    <><svg className="animate-spin w-4 h-4 text-rose-600" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> กำลังค้นหาพิกัด...</>
-                  ) : (
-                    <>📍 ค้นหาโรงพยาบาลใกล้ฉัน</>
-                  )}
-                </button>
-              </div>
-
-              {realHospitals.length === 0 ? (
-                <div className="text-center py-12 bg-rose-50/50 rounded-2xl border-2 border-dashed border-rose-100">
-                  <p className="text-slate-500 font-medium text-sm">ยังไม่ได้โหลดรายชื่อโรงพยาบาล</p>
-                  <p className="text-slate-400 text-xs mt-1">กดปุ่ม "ค้นหาโรงพยาบาลใกล้ฉัน" ด้านบนเพื่อเริ่มดึงพิกัด GPS</p>
-                </div>
-              ) : (
-                <div className="space-y-4 max-h-[450px] overflow-y-auto pr-2 custom-scrollbar">
-                  {realHospitals.map((hospital) => (
-                    <div 
-                      key={hospital.id} 
-                      className={`border-2 rounded-2xl p-4 transition-all cursor-pointer ${selectedHospital === hospital.id ? 'border-rose-400 bg-rose-50/30 shadow-md' : 'border-slate-100 hover:border-rose-200'}`}
-                      onClick={() => setSelectedHospital(hospital.id)}
-                    >
-                      <div className="flex justify-between items-start mb-3">
-                        <div>
-                          <h3 className="font-bold text-slate-800 text-base">{hospital.name}</h3>
-                          <p className="text-xs text-slate-500 flex items-center gap-1 mt-1">
-                            <span className="text-rose-500">📍</span> ห่างจากคุณ {hospital.distance}
-                          </p>
-                        </div>
-                        {selectedHospital === hospital.id && (
-                          <div className="bg-rose-500 text-white text-xs font-bold px-2 py-1 rounded-lg">เลือกแล้ว</div>
-                        )}
-                      </div>
-
-                      {selectedHospital === hospital.id && (
-                        <div className="mt-4 pt-4 border-t border-rose-100 animate-fade-in-up">
-                          <p className="text-xs font-bold text-slate-600 mb-3">เลือกวันและเวลาที่ต้องการนัดหมาย:</p>
-                          <div className="space-y-4">
-                            {hospital.availableDates.map((d: any, idx: number) => (
-                              <div key={idx}>
-                                <p className="text-sm font-semibold text-rose-700 mb-2">{d.date}</p>
-                                <div className="flex flex-wrap gap-2">
-                                  {d.slots.map((time: string) => {
-                                    const isSelected = selectedDateSlot?.date === d.date && selectedDateSlot?.time === time;
-                                    return (
-                                      <button
-                                        key={time}
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setSelectedDateSlot({ date: d.date, time });
-                                        }}
-                                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${isSelected ? 'bg-rose-500 text-white shadow-md shadow-rose-200' : 'bg-white border border-slate-200 text-slate-600 hover:border-rose-300 hover:text-rose-600'}`}
-                                      >
-                                        {time} น.
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {selectedHospital && selectedDateSlot && (
-                <div className="mt-6 animate-fade-in-up">
+            <div className="space-y-8 animate-fade-in">
+              <section className="bg-white rounded-3xl p-6 md:p-8 shadow-xl shadow-rose-100/50 border-t-4 border-rose-400">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
+                  <div>
+                    <h2 className="text-2xl font-extrabold text-rose-900">📅 นัดหมายรับวัคซีน</h2>
+                    <p className="text-sm text-slate-500 mt-1">ค้นหาสถานพยาบาลใกล้ฉันและเลือกช่วงเวลาที่สะดวก</p>
+                  </div>
                   <button
-                    onClick={handleBooking}
-                    className="w-full py-4 px-4 rounded-2xl bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white font-bold text-base transition-all shadow-lg shadow-pink-200"
+                    onClick={handleFindNearby}
+                    disabled={isLocating}
+                    className="flex items-center gap-2 bg-rose-50 hover:bg-rose-100 text-rose-600 px-4 py-2.5 rounded-xl font-bold text-sm transition-all border border-rose-200 w-full md:w-auto justify-center disabled:opacity-60"
                   >
-                    ยืนยันการนัดหมาย
+                    {isLocating ? (
+                      <><svg className="animate-spin w-4 h-4 text-rose-600" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> กำลังค้นหาพิกัด...</>
+                    ) : (
+                      <>📍 ค้นหาสถานพยาบาลใกล้ฉัน</>
+                    )}
                   </button>
                 </div>
-              )}
-            </section>
+
+                {realHospitals.length === 0 ? (
+                  <div className="text-center py-10 bg-rose-50/50 rounded-2xl border-2 border-dashed border-rose-100">
+                    <p className="text-slate-500 font-medium text-sm">ยังไม่ได้โหลดรายชื่อสถานพยาบาล</p>
+                    <p className="text-slate-400 text-xs mt-1">กดปุ่มค้นหาด้านบนเพื่อค้นหาสถานพยาบาลใกล้ตำแหน่งของคุณ</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4 max-h-[350px] overflow-y-auto pr-2 custom-scrollbar">
+                    {realHospitals.map((hospital) => (
+                      <div
+                        key={hospital.id}
+                        className={`border-2 rounded-2xl p-4 transition-all cursor-pointer ${selectedHospital === hospital.id ? 'border-rose-400 bg-rose-50/30 shadow-md' : 'border-slate-100 hover:border-rose-200'}`}
+                        onClick={() => {
+                          if (selectedHospital !== hospital.id) setSelectedDateSlot(null);
+                          setSelectedHospital(hospital.id);
+                        }}
+                      >
+                        <div className="flex justify-between items-start mb-3">
+                          <div>
+                            <h3 className="font-bold text-slate-800 text-base">{hospital.name}</h3>
+                            <p className="text-xs text-slate-500 flex items-center gap-1 mt-1">
+                              <span className="text-rose-500">📍</span> ห่างจากคุณ {hospital.distance}
+                            </p>
+                          </div>
+                          {selectedHospital === hospital.id && (
+                            <div className="bg-rose-500 text-white text-xs font-bold px-2 py-1 rounded-lg">เลือกแล้ว</div>
+                          )}
+                        </div>
+
+                        {selectedHospital === hospital.id && (
+                          <div className="mt-4 pt-4 border-t border-rose-100 animate-fade-in-up">
+                            <p className="text-xs font-bold text-slate-600 mb-3">เลือกวันและเวลาที่ต้องการนัดหมาย:</p>
+                            <div className="space-y-4">
+                              {hospital.availableDates.map((availableDate) => (
+                                <div key={availableDate.dateString}>
+                                  <p className="text-sm font-semibold text-rose-700 mb-2">{availableDate.date}</p>
+                                  <div className="flex flex-wrap gap-2">
+                                    {availableDate.slots.map((time) => {
+                                      const isSelected = selectedDateSlot?.dateString === availableDate.dateString && selectedDateSlot?.time === time;
+                                      return (
+                                        <button
+                                          key={time}
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            setSelectedDateSlot({ date: availableDate.date, dateString: availableDate.dateString, time });
+                                          }}
+                                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${isSelected ? 'bg-rose-500 text-white shadow-md shadow-rose-200' : 'bg-white border border-slate-200 text-slate-600 hover:border-rose-300 hover:text-rose-600'}`}
+                                        >
+                                          {time} น.
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {selectedHospital && selectedDateSlot && (
+                  <div className="mt-6 animate-fade-in-up">
+                    <button
+                      onClick={handleBooking}
+                      disabled={isSavingAppointment}
+                      className="w-full py-4 px-4 rounded-2xl bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white font-bold text-base transition-all shadow-lg shadow-pink-200 disabled:opacity-60"
+                    >
+                      {isSavingAppointment ? 'กำลังบันทึกนัดหมาย...' : 'ยืนยันการนัดหมาย'}
+                    </button>
+                  </div>
+                )}
+              </section>
+
+              <section className="bg-white rounded-3xl p-6 md:p-8 shadow-xl shadow-indigo-100/50 border border-white">
+                <h3 className="text-xl font-bold text-indigo-900 mb-4 flex items-center gap-2">
+                  <span>📋</span> รายการนัดหมายของคุณ
+                </h3>
+                {appointmentError && (
+                  <p role="alert" className="mb-4 rounded-xl bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700">{appointmentError}</p>
+                )}
+                {appointmentsLoading ? (
+                  <p className="py-8 text-center text-sm text-slate-500">กำลังโหลดรายการนัดหมาย...</p>
+                ) : appointments.length === 0 ? (
+                  <p className="py-8 text-center text-sm text-slate-500">ยังไม่มีรายการนัดหมาย</p>
+                ) : (
+                  <div className="space-y-4">
+                    {appointments.map((appointment) => {
+                      const isPending = appointment.status === 'PENDING';
+                      const statusLabel = appointment.status === 'PENDING'
+                        ? 'รอยืนยัน'
+                        : appointment.status === 'CANCELLED'
+                          ? 'ยกเลิกแล้ว'
+                          : appointment.status === 'COMPLETED'
+                            ? 'เสร็จสิ้น'
+                            : appointment.status;
+
+                      return (
+                        <article key={appointment.id} className="p-4 rounded-2xl border-2 border-indigo-50 bg-indigo-50/20">
+                          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                            <div>
+                              <span className={`text-xs font-bold px-3 py-1 rounded-full ${isPending ? 'bg-amber-100 text-amber-700' : appointment.status === 'CANCELLED' ? 'bg-slate-100 text-slate-600' : 'bg-emerald-100 text-emerald-700'}`}>
+                                {statusLabel}
+                              </span>
+                              <h4 className="font-bold text-slate-800 text-base mt-2">{appointment.hospitalName}</h4>
+                              <p className="text-xs text-slate-500 mt-1">
+                                📅 {new Date(appointment.scheduledAt).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' })} น.
+                              </p>
+                            </div>
+                            {isPending && editingAppointmentId !== appointment.id && (
+                              <div className="flex items-center gap-2 w-full sm:w-auto">
+                                <button
+                                  onClick={() => {
+                                    setEditingAppointmentId(appointment.id);
+                                    setEditScheduledAt(toDateTimeInputValue(appointment.scheduledAt));
+                                    setAppointmentError('');
+                                  }}
+                                  className="flex-1 sm:flex-none px-3.5 py-2 bg-amber-50 text-amber-700 hover:bg-amber-100 text-xs font-bold rounded-xl transition-all"
+                                >
+                                  ✏️ เปลี่ยนเวลา
+                                </button>
+                                <button
+                                  onClick={() => void handleCancelAppointment(appointment.id)}
+                                  className="flex-1 sm:flex-none px-3.5 py-2 bg-rose-50 text-rose-600 hover:bg-rose-100 text-xs font-bold rounded-xl transition-all"
+                                >
+                                  ยกเลิกคิว
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                          {editingAppointmentId === appointment.id && (
+                            <div className="mt-4 flex flex-col sm:flex-row gap-2">
+                              <input
+                                type="datetime-local"
+                                value={editScheduledAt}
+                                onChange={(event) => setEditScheduledAt(event.target.value)}
+                                min={toDateTimeInputValue(new Date().toISOString())}
+                                className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700"
+                                aria-label="วันและเวลาใหม่"
+                              />
+                              <button
+                                onClick={() => void handleRescheduleAppointment(appointment.id)}
+                                className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700"
+                              >
+                                บันทึกเวลาใหม่
+                              </button>
+                              <button
+                                onClick={() => setEditingAppointmentId(null)}
+                                className="px-4 py-2 rounded-xl bg-slate-100 text-slate-600 text-xs font-bold hover:bg-slate-200"
+                              >
+                                ยกเลิก
+                              </button>
+                            </div>
+                          )}
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+            </div>
           )}
 
           {/* TAB 4: TIPS (คำแนะนำก่อนและหลังฉีด) */}

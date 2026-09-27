@@ -55,25 +55,6 @@ function readCoordinate(value: string | null, fallback: number, min: number, max
     : null;
 }
 
-function createAvailableDates() {
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const nextDay = new Date(tomorrow);
-  nextDay.setDate(nextDay.getDate() + 1);
-
-  const formatDate = (date: Date) =>
-    date.toLocaleDateString('th-TH', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
-
-  return [
-    { date: formatDate(tomorrow), slots: ['09:00', '10:30', '13:00', '14:30'] },
-    { date: formatDate(nextDay), slots: ['09:00', '11:00', '13:30'] },
-  ];
-}
-
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const latitude = readCoordinate(searchParams.get('lat'), DEFAULT_LATITUDE, -90, 90);
@@ -113,7 +94,6 @@ export async function GET(req: Request) {
 
     const data = (await response.json()) as { elements?: OverpassElement[] };
     const seenElements = new Set<string>();
-    const availableDates = createAvailableDates();
     let unnamedHospitalCount = 0;
     const hospitals: Hospital[] = (data.elements ?? []).flatMap((element) => {
       const elementKey = `${element.type}-${element.id}`;
@@ -145,32 +125,9 @@ export async function GET(req: Request) {
         longitude: hospitalLongitude,
         distanceVal,
         distance: formatDistance(distanceVal),
-        availableDates,
+        availableDates: [],
       }];
     });
-
-    if (hospitals.length === 0) {
-      hospitals.push(
-        {
-          id: 'fallback-1',
-          name: 'โรงพยาบาลสรรพยา',
-          latitude: 15.1389,
-          longitude: 100.2755,
-          distanceVal: getDistance(latitude, longitude, 15.1389, 100.2755),
-          distance: formatDistance(getDistance(latitude, longitude, 15.1389, 100.2755)),
-          availableDates,
-        },
-        {
-          id: 'fallback-2',
-          name: 'โรงพยาบาลชัยนาทนเรนทร',
-          latitude: 15.1852,
-          longitude: 100.1245,
-          distanceVal: getDistance(latitude, longitude, 15.1852, 100.1245),
-          distance: formatDistance(getDistance(latitude, longitude, 15.1852, 100.1245)),
-          availableDates,
-        }
-      );
-    }
 
     hospitals.sort((a, b) => a.distanceVal - b.distanceVal);
     return NextResponse.json({ hospitals });
