@@ -29,10 +29,21 @@ interface VaccineStat {
   count: number;
 }
 
+interface PendingVaccineRecord {
+  id: string;
+  vaccineCode: string | null;
+  vaccineName: string;
+  administeredDate: string;
+  hospitalName: string;
+  user: { username: string; email: string };
+}
+
 export default function AdminDashboardPage() {
   const [users, setUsers] = useState<UserData[]>([]);
   const [appointments, setAppointments] = useState<AppointmentData[]>([]);
   const [vaccineStats, setVaccineStats] = useState<VaccineStat[]>([]);
+  const [pendingVaccineRecords, setPendingVaccineRecords] = useState<PendingVaccineRecord[]>([]);
+  const [reviewError, setReviewError] = useState('');
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
   const [editModalAppt, setEditModalAppt] = useState<AppointmentData | null>(null);
 
@@ -55,7 +66,31 @@ export default function AdminDashboardPage() {
         if (data.vaccineStats) setVaccineStats(data.vaccineStats);
       })
       .catch(() => {});
+
+    fetch('/api/admin/vaccine-records')
+      .then(async (res) => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'ไม่สามารถโหลดประวัติวัคซีนที่รอตรวจได้');
+        setPendingVaccineRecords(data.records ?? []);
+      })
+      .catch((error) => setReviewError(error.message));
   }, []);
+
+  const handleReviewVaccineRecord = async (recordId: string, verificationStatus: 'VERIFIED' | 'REJECTED') => {
+    setReviewError('');
+    try {
+      const response = await fetch('/api/admin/vaccine-records', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recordId, verificationStatus }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'ไม่สามารถบันทึกผลตรวจสอบได้');
+      setPendingVaccineRecords((records) => records.filter((record) => record.id !== recordId));
+    } catch (error) {
+      setReviewError(error instanceof Error ? error.message : 'ไม่สามารถบันทึกผลตรวจสอบได้');
+    }
+  };
 
   const handleSaveEdit = async () => {
     if (!editModalAppt) return;
@@ -77,11 +112,49 @@ export default function AdminDashboardPage() {
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900 p-8 space-y-8 font-sans">
       <div className="flex justify-between items-center border-b pb-4 border-gray-200">
-        <h1 className="text-2xl font-bold text-teal-700">แดชบอร์ดผู้ดูแลระบบ "พร้อมฉีด"</h1>
+        <h1 className="text-2xl font-bold text-teal-700">แดชบอร์ดผู้ดูแลระบบ &quot;พร้อมฉีด&quot;</h1>
         <span className="bg-teal-100 text-teal-800 text-xs px-3 py-1 rounded-full font-semibold">
           Role: Admin (poomg900@gmail.com)
         </span>
       </div>
+
+      <section className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+        <h2 className="text-lg font-bold mb-4 text-gray-800">ตรวจสอบประวัติวัคซีนที่ผู้ปกครองรายงาน</h2>
+        {reviewError && <p role="alert" className="mb-4 rounded-lg bg-rose-50 p-3 text-sm text-rose-700">{reviewError}</p>}
+        {pendingVaccineRecords.length === 0 ? (
+          <p className="py-6 text-center text-sm text-gray-500">ไม่มีประวัติรอตรวจสอบ</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="bg-gray-100 text-gray-700 border-b">
+                  <th className="p-3">ผู้รายงาน</th>
+                  <th className="p-3">วัคซีน</th>
+                  <th className="p-3">วันที่ได้รับ</th>
+                  <th className="p-3">สถานพยาบาลในสมุด</th>
+                  <th className="p-3 text-center">ตรวจสอบ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingVaccineRecords.map((record) => (
+                  <tr key={record.id} className="border-b">
+                    <td className="p-3">{record.user.username}<span className="block text-xs text-gray-500">{record.user.email}</span></td>
+                    <td className="p-3">{record.vaccineName}<span className="block text-xs text-gray-500">{record.vaccineCode}</span></td>
+                    <td className="p-3 whitespace-nowrap">{new Date(record.administeredDate).toLocaleDateString('th-TH')}</td>
+                    <td className="p-3">{record.hospitalName}</td>
+                    <td className="p-3">
+                      <div className="flex justify-center gap-2">
+                        <button onClick={() => void handleReviewVaccineRecord(record.id, 'VERIFIED')} className="rounded bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-700">ยืนยัน</button>
+                        <button onClick={() => void handleReviewVaccineRecord(record.id, 'REJECTED')} className="rounded bg-rose-100 px-3 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-200">ปฏิเสธ</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       {/* 1. กราฟแท่งจำนวนผู้ใช้งานตาม วัน-เดือน-ปี-ชั่วโมง */}
       <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">

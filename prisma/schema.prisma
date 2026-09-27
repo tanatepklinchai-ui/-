@@ -98,5 +98,6 @@ model VaccineRecord {
   administeredDate DateTime
   hospitalName     String
   source           String   
+  verificationStatus String @default("PENDING")
   createdAt        DateTime @default(now())
 }

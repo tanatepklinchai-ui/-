@@ -27,26 +27,49 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'กรุณาเข้าสู่ระบบก่อนใช้งาน' }, { status: 401 });
   }
 
-  const data = await req.json();
+  let data: Record<string, unknown>;
+  try {
+    data = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'ข้อมูลโปรไฟล์ไม่ถูกต้อง' }, { status: 400 });
+  }
+
+  const dob = typeof data.dob === 'string' ? new Date(data.dob) : null;
+  if (!dob || !Number.isFinite(dob.getTime()) || dob > new Date()) {
+    return NextResponse.json({ error: 'กรุณาระบุวันเกิดที่ถูกต้อง' }, { status: 400 });
+  }
+
+  const parseOptionalNumber = (value: unknown) => {
+    if (value === undefined) return undefined;
+    if (value === null || value === '') return null;
+    const numberValue = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(numberValue) && numberValue > 0 ? numberValue : null;
+  };
+
+  const firstName = typeof data.firstName === 'string' ? data.firstName.trim() : undefined;
+  const lastName = typeof data.lastName === 'string' ? data.lastName.trim() : undefined;
+  const gender = typeof data.gender === 'string' ? data.gender : undefined;
+  const weight = parseOptionalNumber(data.weight);
+  const height = parseOptionalNumber(data.height);
 
   const profile = await prisma.profile.upsert({
     where: { userId: session.userId },
     update: {
-      firstName: data.firstName,
-      lastName: data.lastName,
-      gender: data.gender,
-      weight: parseFloat(data.weight),
-      height: parseFloat(data.height),
-      dob: new Date(data.dob),
+      firstName,
+      lastName,
+      gender,
+      weight,
+      height,
+      dob,
     },
     create: {
       userId: session.userId,
-      firstName: data.firstName,
-      lastName: data.lastName,
-      gender: data.gender,
-      weight: parseFloat(data.weight),
-      height: parseFloat(data.height),
-      dob: new Date(data.dob),
+      firstName: firstName ?? null,
+      lastName: lastName ?? null,
+      gender: gender ?? null,
+      weight: weight ?? null,
+      height: height ?? null,
+      dob,
     },
   });
 
