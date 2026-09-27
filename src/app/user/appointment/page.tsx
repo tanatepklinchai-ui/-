@@ -20,8 +20,11 @@ export default function AppointmentPage() {
   const [children, setChildren] = useState<ChildOption[]>([]);
   const [selectedChildId, setSelectedChildId] = useState('');
   const [appointments, setAppointments] = useState<AppointmentItem[]>([]);
+  const [cancellationTarget, setCancellationTarget] = useState<AppointmentItem | null>(null);
+  const [isCancelling, setIsCancelling] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const visibleAppointments = appointments.filter((appointment) => appointment.status !== 'CANCELLED');
 
   useEffect(() => {
     fetch('/api/children')
@@ -62,18 +65,23 @@ export default function AppointmentPage() {
   }, [selectedChildId]);
 
   const handleCancelAppointment = async (id: string) => {
-    if (!confirm('คุณต้องการยกเลิกการนัดหมายนี้ใช่หรือไม่?')) return;
-    const response = await fetch('/api/appointments', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ appointmentId: id, status: 'CANCELLED' }),
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      setMessage(data.error || 'ไม่สามารถยกเลิกนัดหมายได้');
-      return;
+    setIsCancelling(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/appointments', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ appointmentId: id, status: 'CANCELLED' }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'ไม่สามารถยกเลิกนัดหมายได้');
+      setAppointments((current) => current.filter((appointment) => appointment.id !== id));
+      setCancellationTarget(null);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'ไม่สามารถยกเลิกนัดหมายได้');
+    } finally {
+      setIsCancelling(false);
     }
-    setAppointments((current) => current.map((appointment) => appointment.id === id ? data.appointment : appointment));
   };
 
   return (
@@ -135,11 +143,11 @@ export default function AppointmentPage() {
           <h3 className="text-base font-semibold text-slate-800 mb-4">รายการนัดหมายของคุณ</h3>
           {loading ? (
             <p className="text-xs text-slate-400 py-6 text-center">กำลังโหลดรายการนัดหมาย...</p>
-          ) : appointments.length === 0 ? (
+          ) : visibleAppointments.length === 0 ? (
             <p className="text-xs text-slate-400 py-6 text-center">ไม่มีรายการนัดหมายในขณะนี้</p>
           ) : (
             <div className="space-y-3">
-              {appointments.map((appt) => (
+              {visibleAppointments.map((appt) => (
                 <div
                   key={appt.id}
                   className="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-xl border border-slate-100 bg-slate-50/40 gap-3"
@@ -164,9 +172,9 @@ export default function AppointmentPage() {
                       {appt.status === 'COMPLETED' ? 'เสร็จสิ้น' : appt.status === 'CANCELLED' ? 'ยกเลิกแล้ว' : 'รอรับบริการ'}
                     </span>
 
-                    {appt.status === 'PENDING' && (
+                    {['PENDING', 'CONFIRMED'].includes(appt.status) && (
                       <button
-                        onClick={() => void handleCancelAppointment(appt.id)}
+                        onClick={() => setCancellationTarget(appt)}
                         className="text-xs font-medium bg-rose-50 hover:bg-rose-100 text-rose-700 px-3 py-1.5 rounded-lg transition-colors"
                       >
                         ยกเลิกนัด
@@ -178,6 +186,43 @@ export default function AppointmentPage() {
             </div>
           )}
         </section>
+        {cancellationTarget && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget && !isCancelling) setCancellationTarget(null);
+            }}
+          >
+            <section
+              role="alertdialog"
+              aria-modal="true"
+              aria-labelledby="appointment-cancel-title"
+              aria-describedby="appointment-cancel-description"
+              className="w-full max-w-md overflow-hidden rounded-2xl border border-rose-100 bg-white shadow-2xl shadow-slate-950/20"
+            >
+              <div className="h-1.5 bg-gradient-to-r from-rose-400 via-pink-500 to-rose-400" />
+              <div className="p-6 sm:p-7">
+                <div className="flex items-start gap-4">
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-rose-50 text-2xl text-rose-600" aria-hidden="true">!</div>
+                  <div>
+                    <p className="text-xs font-bold uppercase text-rose-600">ยืนยันการยกเลิก</p>
+                    <h2 id="appointment-cancel-title" className="mt-1 text-xl font-extrabold text-slate-900">ยกเลิกนัดหมายนี้?</h2>
+                    <p id="appointment-cancel-description" className="mt-2 text-sm leading-relaxed text-slate-600">เมื่อยืนยัน ระบบจะคืนที่นั่งและนำรายการนี้ออกจากรายการนัดหมาย</p>
+                  </div>
+                </div>
+                <div className="mt-5 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
+                  <p className="font-bold text-slate-800">{cancellationTarget.hospitalName}</p>
+                  <p className="mt-1 text-xs text-slate-500">{new Date(cancellationTarget.scheduledAt).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' })} น.</p>
+                </div>
+                {message && <p role="alert" className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{message}</p>}
+                <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                  <button type="button" disabled={isCancelling} onClick={() => setCancellationTarget(null)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50">กลับไปดูนัดหมาย</button>
+                  <button type="button" disabled={isCancelling} onClick={() => void handleCancelAppointment(cancellationTarget.id)} className="rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-rose-700 disabled:cursor-wait disabled:opacity-60">{isCancelling ? 'กำลังยกเลิก...' : 'ยืนยันยกเลิกนัด'}</button>
+                </div>
+              </div>
+            </section>
+          </div>
+        )}
       </main>
     </div>
   );

@@ -83,6 +83,8 @@ export default function ColorfulDashboard() {
   const [vaccineToBook, setVaccineToBook] = useState<{ name: string; age: string } | null>(null);
   const [realHospitals, setRealHospitals] = useState<HospitalOption[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [cancellationTarget, setCancellationTarget] = useState<Appointment | null>(null);
+  const [isCancellingAppointment, setIsCancellingAppointment] = useState(false);
   const [appointmentsLoading, setAppointmentsLoading] = useState(true);
   const [appointmentError, setAppointmentError] = useState('');
   const [isSavingAppointment, setIsSavingAppointment] = useState(false);
@@ -203,6 +205,7 @@ export default function ColorfulDashboard() {
       return { vaccine, dueDate, record, isDue };
     })
     : [];
+  const visibleAppointments = appointments.filter((appointment) => appointment.status !== 'CANCELLED');
 
   const handleSaveProfile = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -383,8 +386,8 @@ export default function ColorfulDashboard() {
   };
 
   const handleCancelAppointment = async (appointmentId: string) => {
-    if (!confirm('คุณต้องการยกเลิกการนัดหมายนี้ใช่หรือไม่?')) return;
-
+    setIsCancellingAppointment(true);
+    setAppointmentError('');
     try {
       const response = await fetch('/api/appointments', {
         method: 'PATCH',
@@ -393,11 +396,12 @@ export default function ColorfulDashboard() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'ไม่สามารถยกเลิกนัดหมายได้');
-      setAppointments((current) => current.map((appointment) =>
-        appointment.id === appointmentId ? data.appointment : appointment
-      ));
+      setAppointments((current) => current.filter((appointment) => appointment.id !== appointmentId));
+      setCancellationTarget(null);
     } catch (error) {
       setAppointmentError(error instanceof Error ? error.message : 'ไม่สามารถยกเลิกนัดหมายได้');
+    } finally {
+      setIsCancellingAppointment(false);
     }
   };
 
@@ -882,11 +886,11 @@ export default function ColorfulDashboard() {
                 )}
                 {appointmentsLoading ? (
                   <p className="py-8 text-center text-sm text-slate-500">กำลังโหลดรายการนัดหมาย...</p>
-                ) : appointments.length === 0 ? (
+                ) : visibleAppointments.length === 0 ? (
                   <p className="py-8 text-center text-sm text-slate-500">ยังไม่มีรายการนัดหมาย</p>
                 ) : (
                   <div className="space-y-4">
-                    {appointments.map((appointment) => {
+                    {visibleAppointments.map((appointment) => {
                       const canManage = ['PENDING', 'CONFIRMED'].includes(appointment.status);
                       const currentSlotKey = getBangkokSlotKey(appointment.scheduledAt);
                       const editableSlots = appointment.hospital?.slots.filter((slot) =>
@@ -926,7 +930,7 @@ export default function ColorfulDashboard() {
                                   ✏️ เปลี่ยนเวลา
                                 </button>
                                 <button
-                                  onClick={() => void handleCancelAppointment(appointment.id)}
+                                  onClick={() => setCancellationTarget(appointment)}
                                   className="flex-1 sm:flex-none px-3.5 py-2 bg-rose-50 text-rose-600 hover:bg-rose-100 text-xs font-bold rounded-xl transition-all"
                                 >
                                   ยกเลิกคิว
@@ -1021,6 +1025,62 @@ export default function ColorfulDashboard() {
 
         </main>
       </div>
+
+      {cancellationTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !isCancellingAppointment) setCancellationTarget(null);
+          }}
+        >
+          <section
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="cancel-appointment-title"
+            aria-describedby="cancel-appointment-description"
+            className="w-full max-w-md overflow-hidden rounded-2xl border border-rose-100 bg-white shadow-2xl shadow-slate-950/20"
+          >
+            <div className="h-1.5 bg-gradient-to-r from-rose-400 via-pink-500 to-rose-400" />
+            <div className="p-6 sm:p-7">
+              <div className="flex items-start gap-4">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-rose-50 text-2xl text-rose-600" aria-hidden="true">!</div>
+                <div>
+                  <p className="text-xs font-bold uppercase text-rose-600">ยืนยันการยกเลิก</p>
+                  <h2 id="cancel-appointment-title" className="mt-1 text-xl font-extrabold text-slate-900">ยกเลิกนัดหมายนี้?</h2>
+                  <p id="cancel-appointment-description" className="mt-2 text-sm leading-relaxed text-slate-600">
+                    ระบบจะคืนที่นั่งให้รอบเวลานี้ และนำรายการออกจากนัดหมายของคุณ
+                  </p>
+                </div>
+              </div>
+              <div className="mt-5 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
+                <p className="font-bold text-slate-800">{cancellationTarget.hospitalName}</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  {new Date(cancellationTarget.scheduledAt).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' })} น.
+                </p>
+              </div>
+              {appointmentError && <p role="alert" className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{appointmentError}</p>}
+              <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  disabled={isCancellingAppointment}
+                  onClick={() => setCancellationTarget(null)}
+                  className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+                >
+                  กลับไปดูนัดหมาย
+                </button>
+                <button
+                  type="button"
+                  disabled={isCancellingAppointment}
+                  onClick={() => void handleCancelAppointment(cancellationTarget.id)}
+                  className="rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-rose-700 disabled:cursor-wait disabled:opacity-60"
+                >
+                  {isCancellingAppointment ? 'กำลังยกเลิก...' : 'ยืนยันยกเลิกนัด'}
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
 
       <style dangerouslySetInnerHTML={{__html: `
         .custom-scrollbar::-webkit-scrollbar { width: 6px; }
