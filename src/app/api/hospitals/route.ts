@@ -122,7 +122,14 @@ export async function GET(req: Request) {
 
       const hospitalLatitude = element.lat ?? element.center?.lat;
       const hospitalLongitude = element.lon ?? element.center?.lon;
-      if (!Number.isFinite(hospitalLatitude) || !Number.isFinite(hospitalLongitude)) return [];
+      if (
+        typeof hospitalLatitude !== 'number' ||
+        typeof hospitalLongitude !== 'number' ||
+        !Number.isFinite(hospitalLatitude) ||
+        !Number.isFinite(hospitalLongitude)
+      ) {
+        return [];
+      }
 
       const distanceVal = getDistance(
         latitude,
