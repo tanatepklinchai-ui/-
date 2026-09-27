@@ -13,14 +13,24 @@ type HospitalOption = {
 type Appointment = {
   id: string;
   hospitalName: string;
+  hospitalId: string | null;
   scheduledAt: string;
   status: string;
+  hospital: { slots: { date: string; time: string; booked: number; capacity: number }[] } | null;
 };
 
-function toDateTimeInputValue(value: string | Date) {
-  const date = new Date(value);
-  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return localDate.toISOString().slice(0, 16);
+function getBangkokSlotKey(value: string | Date) {
+  const parts = new Intl.DateTimeFormat('en', {
+    timeZone: 'Asia/Bangkok',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date(value));
+  const partValues = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${partValues.year}-${partValues.month}-${partValues.day}|${partValues.hour}:${partValues.minute}`;
 }
 
 export default function ColorfulDashboard() {
@@ -34,7 +44,7 @@ export default function ColorfulDashboard() {
   const [appointmentError, setAppointmentError] = useState('');
   const [isSavingAppointment, setIsSavingAppointment] = useState(false);
   const [editingAppointmentId, setEditingAppointmentId] = useState<string | null>(null);
-  const [editScheduledAt, setEditScheduledAt] = useState('');
+  const [editSlotKey, setEditSlotKey] = useState('');
 
   useEffect(() => {
     const loadAppointments = async () => {
@@ -102,8 +112,11 @@ export default function ColorfulDashboard() {
           const { latitude, longitude } = position.coords;
           const res = await fetch(`/api/hospitals?lat=${latitude}&lng=${longitude}`);
           const data = await res.json();
-          if (data.hospitals) setRealHospitals(data.hospitals);
-        } catch (error) {
+          if (!res.ok) throw new Error(data.error || 'ค้นหาสถานพยาบาลไม่สำเร็จ');
+          setRealHospitals(data.hospitals ?? []);
+          setSelectedHospital(null);
+          setSelectedDateSlot(null);
+        } catch {
           alert('เกิดข้อผิดพลาดในการดึงข้อมูลโรงพยาบาล');
         } finally {
           setIsLocating(false);
@@ -129,11 +142,11 @@ export default function ColorfulDashboard() {
     setIsSavingAppointment(true);
     setAppointmentError('');
     try {
-      const scheduledAt = new Date(`${selectedDateSlot.dateString}T${selectedDateSlot.time}:00`);
+      const scheduledAt = new Date(`${selectedDateSlot.dateString}T${selectedDateSlot.time}:00+07:00`);
       const response = await fetch('/api/appointments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hospitalName: hospital.name, scheduledAt: scheduledAt.toISOString() }),
+        body: JSON.stringify({ hospitalId: hospital.id, scheduledAt: scheduledAt.toISOString() }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'ไม่สามารถบันทึกนัดหมายได้');
@@ -171,7 +184,13 @@ export default function ColorfulDashboard() {
   };
 
   const handleRescheduleAppointment = async (appointmentId: string) => {
-    const scheduledAt = new Date(editScheduledAt);
+    const [date, time] = editSlotKey.split('|');
+    if (!date || !time) {
+      setAppointmentError('กรุณาเลือกช่วงเวลาใหม่');
+      return;
+    }
+
+    const scheduledAt = new Date(`${date}T${time}:00+07:00`);
     if (!Number.isFinite(scheduledAt.getTime()) || scheduledAt <= new Date()) {
       setAppointmentError('กรุณาเลือกวันและเวลาในอนาคต');
       return;
@@ -189,7 +208,7 @@ export default function ColorfulDashboard() {
         appointment.id === appointmentId ? data.appointment : appointment
       ));
       setEditingAppointmentId(null);
-      setEditScheduledAt('');
+      setEditSlotKey('');
       setAppointmentError('');
     } catch (error) {
       setAppointmentError(error instanceof Error ? error.message : 'ไม่สามารถเปลี่ยนเวลานัดหมายได้');
@@ -407,31 +426,37 @@ export default function ColorfulDashboard() {
 
                         {selectedHospital === hospital.id && (
                           <div className="mt-4 pt-4 border-t border-rose-100 animate-fade-in-up">
-                            <p className="text-xs font-bold text-slate-600 mb-3">เลือกวันและเวลาที่ต้องการนัดหมาย:</p>
-                            <div className="space-y-4">
-                              {hospital.availableDates.map((availableDate) => (
-                                <div key={availableDate.dateString}>
-                                  <p className="text-sm font-semibold text-rose-700 mb-2">{availableDate.date}</p>
-                                  <div className="flex flex-wrap gap-2">
-                                    {availableDate.slots.map((time) => {
-                                      const isSelected = selectedDateSlot?.dateString === availableDate.dateString && selectedDateSlot?.time === time;
-                                      return (
-                                        <button
-                                          key={time}
-                                          onClick={(event) => {
-                                            event.stopPropagation();
-                                            setSelectedDateSlot({ date: availableDate.date, dateString: availableDate.dateString, time });
-                                          }}
-                                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${isSelected ? 'bg-rose-500 text-white shadow-md shadow-rose-200' : 'bg-white border border-slate-200 text-slate-600 hover:border-rose-300 hover:text-rose-600'}`}
-                                        >
-                                          {time} น.
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
+                            {hospital.availableDates.length === 0 ? (
+                              <p className="text-sm text-slate-500">ไม่มีช่วงเวลาว่างใน 3 วันทำการถัดไป</p>
+                            ) : (
+                              <>
+                                <p className="text-xs font-bold text-slate-600 mb-3">เลือกวันและเวลาที่ต้องการนัดหมาย:</p>
+                                <div className="space-y-4">
+                                  {hospital.availableDates.map((availableDate) => (
+                                    <div key={availableDate.dateString}>
+                                      <p className="text-sm font-semibold text-rose-700 mb-2">{availableDate.date}</p>
+                                      <div className="flex flex-wrap gap-2">
+                                        {availableDate.slots.map((time) => {
+                                          const isSelected = selectedDateSlot?.dateString === availableDate.dateString && selectedDateSlot?.time === time;
+                                          return (
+                                            <button
+                                              key={time}
+                                              onClick={(event) => {
+                                                event.stopPropagation();
+                                                setSelectedDateSlot({ date: availableDate.date, dateString: availableDate.dateString, time });
+                                              }}
+                                              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${isSelected ? 'bg-rose-500 text-white shadow-md shadow-rose-200' : 'bg-white border border-slate-200 text-slate-600 hover:border-rose-300 hover:text-rose-600'}`}
+                                            >
+                                              {time} น.
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  ))}
                                 </div>
-                              ))}
-                            </div>
+                              </>
+                            )}
                           </div>
                         )}
                       </div>
@@ -467,6 +492,11 @@ export default function ColorfulDashboard() {
                   <div className="space-y-4">
                     {appointments.map((appointment) => {
                       const isPending = appointment.status === 'PENDING';
+                      const currentSlotKey = getBangkokSlotKey(appointment.scheduledAt);
+                      const editableSlots = appointment.hospital?.slots.filter((slot) =>
+                        slot.booked < slot.capacity ||
+                        `${new Date(slot.date).toISOString().slice(0, 10)}|${slot.time}` === currentSlotKey
+                      ) ?? [];
                       const statusLabel = appointment.status === 'PENDING'
                         ? 'รอยืนยัน'
                         : appointment.status === 'CANCELLED'
@@ -492,7 +522,7 @@ export default function ColorfulDashboard() {
                                 <button
                                   onClick={() => {
                                     setEditingAppointmentId(appointment.id);
-                                    setEditScheduledAt(toDateTimeInputValue(appointment.scheduledAt));
+                                    setEditSlotKey(currentSlotKey);
                                     setAppointmentError('');
                                   }}
                                   className="flex-1 sm:flex-none px-3.5 py-2 bg-amber-50 text-amber-700 hover:bg-amber-100 text-xs font-bold rounded-xl transition-all"
@@ -510,22 +540,39 @@ export default function ColorfulDashboard() {
                           </div>
                           {editingAppointmentId === appointment.id && (
                             <div className="mt-4 flex flex-col sm:flex-row gap-2">
-                              <input
-                                type="datetime-local"
-                                value={editScheduledAt}
-                                onChange={(event) => setEditScheduledAt(event.target.value)}
-                                min={toDateTimeInputValue(new Date().toISOString())}
+                              <select
+                                value={editSlotKey}
+                                onChange={(event) => setEditSlotKey(event.target.value)}
                                 className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700"
-                                aria-label="วันและเวลาใหม่"
-                              />
+                                aria-label="เลือกช่วงเวลาใหม่"
+                              >
+                                {editableSlots.length === 0 && <option value="">ไม่มีช่วงเวลาว่าง</option>}
+                                {editableSlots.map((slot) => {
+                                  const dateString = new Date(slot.date).toISOString().slice(0, 10);
+                                  const slotKey = `${dateString}|${slot.time}`;
+                                  const dateLabel = new Date(slot.date).toLocaleDateString('th-TH', {
+                                    dateStyle: 'medium',
+                                    timeZone: 'UTC',
+                                  });
+                                  return (
+                                    <option key={slotKey} value={slotKey}>
+                                      {dateLabel} เวลา {slot.time} น.
+                                    </option>
+                                  );
+                                })}
+                              </select>
                               <button
                                 onClick={() => void handleRescheduleAppointment(appointment.id)}
+                                disabled={!editSlotKey || editableSlots.length === 0}
                                 className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700"
                               >
                                 บันทึกเวลาใหม่
                               </button>
                               <button
-                                onClick={() => setEditingAppointmentId(null)}
+                                onClick={() => {
+                                  setEditingAppointmentId(null);
+                                  setEditSlotKey('');
+                                }}
                                 className="px-4 py-2 rounded-xl bg-slate-100 text-slate-600 text-xs font-bold hover:bg-slate-200"
                               >
                                 ยกเลิก

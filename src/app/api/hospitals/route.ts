@@ -1,11 +1,14 @@
 // src/app/api/hospitals/route.ts
 import { NextResponse } from 'next/server';
+import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
 
 const DEFAULT_LATITUDE = 15.1389;
 const DEFAULT_LONGITUDE = 100.2755;
 const SEARCH_RADIUS_METERS = 15_000;
+const SLOT_TIMES = ['09:00', '10:00', '11:00', '13:00', '14:00', '15:00'];
+const SLOT_CAPACITY = 10;
 
 type OverpassElement = {
   type: string;
@@ -23,8 +26,43 @@ type Hospital = {
   longitude: number;
   distanceVal: number;
   distance: string;
-  availableDates: { date: string; slots: string[] }[];
+  availableDates: { date: string; dateString: string; slots: string[] }[];
 };
+
+function getUpcomingBusinessDates() {
+  const dateParts = new Intl.DateTimeFormat('en', {
+    timeZone: 'Asia/Bangkok',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+  }).formatToParts(new Date());
+  const partValues = Object.fromEntries(dateParts.map(({ type, value }) => [type, value]));
+  const currentDate = new Date(Date.UTC(
+    Number(partValues.year),
+    Number(partValues.month) - 1,
+    Number(partValues.day)
+  ));
+  const businessDates: Date[] = [];
+
+  while (businessDates.length < 3) {
+    currentDate.setUTCDate(currentDate.getUTCDate() + 1);
+    const dayOfWeek = currentDate.getUTCDay();
+    if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+      businessDates.push(new Date(currentDate));
+    }
+  }
+
+  return businessDates;
+}
+
+function formatSlotDate(date: Date) {
+  return date.toLocaleDateString('th-TH', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
+}
 
 function getDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
   const earthRadiusKm = 6371;
@@ -95,7 +133,7 @@ export async function GET(req: Request) {
     const data = (await response.json()) as { elements?: OverpassElement[] };
     const seenElements = new Set<string>();
     let unnamedHospitalCount = 0;
-    const hospitals: Hospital[] = (data.elements ?? []).flatMap((element) => {
+    const mappedHospitals = (data.elements ?? []).flatMap((element) => {
       const elementKey = `${element.type}-${element.id}`;
       if (seenElements.has(elementKey)) return [];
       seenElements.add(elementKey);
@@ -125,10 +163,70 @@ export async function GET(req: Request) {
         longitude: hospitalLongitude,
         distanceVal,
         distance: formatDistance(distanceVal),
-        availableDates: [],
       }];
     });
 
+    if (mappedHospitals.length === 0) {
+      return NextResponse.json({ hospitals: [] });
+    }
+
+    const businessDates = getUpcomingBusinessDates();
+    const hospitalIds = mappedHospitals.map((hospital) => hospital.id);
+
+    await prisma.$transaction(async (transaction) => {
+      await transaction.hospital.createMany({
+        data: mappedHospitals.map(({ id, name, latitude, longitude }) => ({
+          id,
+          name,
+          latitude,
+          longitude,
+        })),
+        skipDuplicates: true,
+      });
+
+      await transaction.hospitalSlot.createMany({
+        data: mappedHospitals.flatMap(({ id }) =>
+          businessDates.flatMap((date) =>
+            SLOT_TIMES.map((time) => ({
+              hospitalId: id,
+              date,
+              time,
+              capacity: SLOT_CAPACITY,
+            }))
+          )
+        ),
+        skipDuplicates: true,
+      });
+    });
+
+    const hospitalsWithSlots = await prisma.hospital.findMany({
+      where: { id: { in: hospitalIds } },
+      include: {
+        slots: {
+          where: { date: { in: businessDates } },
+          orderBy: [{ date: 'asc' }, { time: 'asc' }],
+        },
+      },
+    });
+    const slotsByHospitalId = new Map(hospitalsWithSlots.map((hospital) => {
+      const dateGroups = new Map<string, { date: string; dateString: string; slots: string[] }>();
+      hospital.slots.filter((slot) => slot.booked < slot.capacity).forEach((slot) => {
+        const dateString = slot.date.toISOString().slice(0, 10);
+        const group = dateGroups.get(dateString) ?? {
+          date: formatSlotDate(slot.date),
+          dateString,
+          slots: [],
+        };
+        group.slots.push(slot.time);
+        dateGroups.set(dateString, group);
+      });
+      return [hospital.id, Array.from(dateGroups.values())];
+    }));
+
+    const hospitals: Hospital[] = mappedHospitals.map((hospital) => ({
+      ...hospital,
+      availableDates: slotsByHospitalId.get(hospital.id) ?? [],
+    }));
     hospitals.sort((a, b) => a.distanceVal - b.distanceVal);
     return NextResponse.json({ hospitals });
   } catch {
