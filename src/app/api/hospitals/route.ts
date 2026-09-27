@@ -26,7 +26,7 @@ type Hospital = {
   longitude: number;
   distanceVal: number;
   distance: string;
-  availableDates: { date: string; dateString: string; slots: string[] }[];
+  availableDates: { date: string; dateString: string; slots: string[]; fullSlots: string[] }[];
 };
 
 function getUpcomingBusinessDates() {
@@ -209,15 +209,17 @@ export async function GET(req: Request) {
       },
     });
     const slotsByHospitalId = new Map(hospitalsWithSlots.map((hospital) => {
-      const dateGroups = new Map<string, { date: string; dateString: string; slots: string[] }>();
-      hospital.slots.filter((slot) => !slot.isClosed && slot.booked < slot.capacity).forEach((slot) => {
+      const dateGroups = new Map<string, { date: string; dateString: string; slots: string[]; fullSlots: string[] }>();
+      hospital.slots.filter((slot) => !slot.isClosed).forEach((slot) => {
         const dateString = slot.date.toISOString().slice(0, 10);
         const group = dateGroups.get(dateString) ?? {
           date: formatSlotDate(slot.date),
           dateString,
           slots: [],
+          fullSlots: [],
         };
-        group.slots.push(slot.time);
+        if (slot.booked < slot.capacity) group.slots.push(slot.time);
+        else group.fullSlots.push(slot.time);
         dateGroups.set(dateString, group);
       });
       return [hospital.id, Array.from(dateGroups.values())];

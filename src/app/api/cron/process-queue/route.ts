@@ -91,7 +91,7 @@ export async function GET() {
         });
         if (result.count !== 1) return false;
 
-        if (appointment.hospitalId) {
+        if (appointment.hospitalId && !appointment.isWaitlisted) {
           const timeParts = new Intl.DateTimeFormat('en', {
             timeZone: 'Asia/Bangkok',
             year: 'numeric', month: '2-digit', day: '2-digit',

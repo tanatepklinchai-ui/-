@@ -52,17 +52,37 @@ export async function PATCH(req: Request) {
       if (!current || !['PENDING', 'CONFIRMED'].includes(current.status)) {
         throw new RequestError('ไม่พบคิวหรือไม่สามารถเปลี่ยนสถานะคิวนี้ได้', 409);
       }
-        const statusUpdate = await transaction.appointment.updateMany({
-          where: { id: appointmentId, status: current.status },
-          data: { status },
-        });
-        if (statusUpdate.count !== 1) throw new RequestError('คิวมีการเปลี่ยนแปลง กรุณาโหลดใหม่', 409);
-      if (status === 'CANCELLED' && current.hospitalId) {
+
+      if (status === 'CONFIRMED' && current.status === 'CONFIRMED') return current;
+
+      if (status === 'CONFIRMED' && current.isWaitlisted) {
+        if (!current.hospitalId) throw new RequestError('คิวรออนุมัตินี้ไม่มีสถานพยาบาล', 409);
         const slotKey = getBangkokSlot(current.scheduledAt);
-        await transaction.hospitalSlot.updateMany({
-          where: { hospitalId: current.hospitalId, date: slotKey.date, time: slotKey.time, booked: { gt: 0 } },
-          data: { booked: { decrement: 1 } },
+        const slot = await transaction.hospitalSlot.findUnique({
+          where: { hospitalId_date_time: { hospitalId: current.hospitalId, date: slotKey.date, time: slotKey.time } },
         });
+        if (!slot || slot.isClosed) throw new RequestError('รอบเวลานี้ปิดรับจองแล้ว', 409);
+        const reservation = await transaction.hospitalSlot.updateMany({
+          where: { id: slot.id, isClosed: false, booked: { lt: slot.capacity } },
+          data: { booked: { increment: 1 } },
+        });
+        if (reservation.count !== 1) throw new RequestError('รอบเวลายังเต็ม ไม่สามารถอนุมัติคิวได้', 409);
+      }
+
+      const statusUpdate = await transaction.appointment.updateMany({
+        where: { id: appointmentId, status: current.status, isWaitlisted: current.isWaitlisted },
+        data: { status, ...(status === 'CONFIRMED' ? { isWaitlisted: false } : {}) },
+      });
+      if (statusUpdate.count !== 1) throw new RequestError('คิวมีการเปลี่ยนแปลง กรุณาโหลดใหม่', 409);
+
+      if (status === 'CANCELLED' && current.hospitalId && !current.isWaitlisted) {
+        if (!current.isWaitlisted) {
+          const slotKey = getBangkokSlot(current.scheduledAt);
+          await transaction.hospitalSlot.updateMany({
+            where: { hospitalId: current.hospitalId, date: slotKey.date, time: slotKey.time, booked: { gt: 0 } },
+            data: { booked: { decrement: 1 } },
+          });
+        }
       }
       return transaction.appointment.findUnique({ where: { id: appointmentId } });
     });

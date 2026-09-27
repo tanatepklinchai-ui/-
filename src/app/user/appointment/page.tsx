@@ -16,6 +16,7 @@ interface AppointmentItem {
   hospitalName: string;
   scheduledAt: string;
   status: string;
+  isWaitlisted: boolean;
 }
 
 export default function AppointmentPage() {
@@ -170,7 +171,15 @@ export default function AppointmentPage() {
                           : 'bg-amber-50 text-amber-700'
                       }`}
                     >
-                      {appt.status === 'COMPLETED' ? 'เสร็จสิ้น' : appt.status === 'CANCELLED' ? 'ยกเลิกแล้ว' : 'รอรับบริการ'}
+                      {appt.status === 'COMPLETED'
+                        ? 'เสร็จสิ้น'
+                        : appt.status === 'CANCELLED'
+                          ? 'ยกเลิกแล้ว'
+                          : appt.isWaitlisted
+                            ? 'คิวเต็ม • รออนุมัติ'
+                            : appt.status === 'CONFIRMED'
+                              ? 'ยืนยันแล้ว'
+                              : 'รอรับบริการ'}
                     </span>
 
                     {['PENDING', 'CONFIRMED'].includes(appt.status) && (

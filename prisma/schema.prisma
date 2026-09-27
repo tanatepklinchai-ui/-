@@ -107,6 +107,7 @@ model Appointment {
   notified1Day  Boolean  @default(false)
   notified1Hour Boolean  @default(false)
   status        String   @default("PENDING")
+  isWaitlisted  Boolean  @default(false)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 }

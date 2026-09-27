@@ -27,7 +27,7 @@ export async function POST(
 
     const appointment = await prisma.$transaction(async (transaction) => {
       const current = await transaction.appointment.findUnique({ where: { id } });
-      if (!current || !['PENDING', 'CONFIRMED'].includes(current.status)) {
+      if (!current || !['PENDING', 'CONFIRMED'].includes(current.status) || current.isWaitlisted) {
         throw new CompletionError('ไม่พบคิวหรือคิวนี้ไม่ได้อยู่ในสถานะรอมารับบริการ', 409);
       }
 

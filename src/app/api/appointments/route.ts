@@ -127,13 +127,33 @@ export async function POST(req: Request) {
       if (!slot) {
         throw new AppointmentRequestError('ช่วงเวลานี้ไม่ได้เปิดให้จองแล้ว', 409);
       }
+      if (slot.isClosed) {
+        throw new AppointmentRequestError('รอบเวลานี้ปิดรับจองแล้ว', 409);
+      }
 
       const reservation = await transaction.hospitalSlot.updateMany({
         where: { id: slot.id, isClosed: false, booked: { lt: slot.capacity } },
         data: { booked: { increment: 1 } },
       });
-      if (reservation.count !== 1) {
-        throw new AppointmentRequestError('ช่วงเวลานี้เต็มแล้ว กรุณาเลือกเวลาอื่น', 409);
+      let seatReserved = reservation.count === 1;
+      let status = 'CONFIRMED';
+      let isWaitlisted = false;
+      if (!seatReserved) {
+        const latestSlot = await transaction.hospitalSlot.findUnique({ where: { id: slot.id } });
+        if (!latestSlot || latestSlot.isClosed) {
+          throw new AppointmentRequestError('รอบเวลานี้ปิดรับจองแล้ว', 409);
+        }
+        if (latestSlot.booked < latestSlot.capacity) {
+          const retryReservation = await transaction.hospitalSlot.updateMany({
+            where: { id: slot.id, isClosed: false, booked: { lt: latestSlot.capacity } },
+            data: { booked: { increment: 1 } },
+          });
+          seatReserved = retryReservation.count === 1;
+        }
+        if (!seatReserved) {
+          status = 'PENDING';
+          isWaitlisted = true;
+        }
       }
 
       return transaction.appointment.create({
@@ -143,13 +163,14 @@ export async function POST(req: Request) {
           hospitalId: hospital.id,
           hospitalName: hospital.name,
           scheduledAt: appointmentDate,
-          status: 'PENDING',
+          status,
+          isWaitlisted,
         },
         include: appointmentInclude(),
       });
     });
 
-    return NextResponse.json({ success: true, appointment }, { status: 201 });
+    return NextResponse.json({ success: true, appointment, waitlisted: appointment.isWaitlisted }, { status: appointment.isWaitlisted ? 202 : 201 });
   } catch (error) {
     if (error instanceof AppointmentRequestError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
@@ -187,7 +208,7 @@ export async function PATCH(req: Request) {
       }
 
       if (status === 'CANCELLED') {
-        if (currentAppointment.hospitalId) {
+        if (currentAppointment.hospitalId && !currentAppointment.isWaitlisted) {
           const currentSlot = getBangkokSlot(currentAppointment.scheduledAt);
           await transaction.hospitalSlot.updateMany({
             where: {
@@ -215,20 +236,44 @@ export async function PATCH(req: Request) {
       const isSameSlot = currentSlot.date.getTime() === newSlot.date.getTime() &&
         currentSlot.time === newSlot.time;
 
-      if (!isSameSlot) {
-        const targetSlot = await transaction.hospitalSlot.findUnique({
-          where: {
-            hospitalId_date_time: {
-              hospitalId: currentAppointment.hospitalId,
-              date: newSlot.date,
-              time: newSlot.time,
-            },
+      const targetSlot = await transaction.hospitalSlot.findUnique({
+        where: {
+          hospitalId_date_time: {
+            hospitalId: currentAppointment.hospitalId,
+            date: newSlot.date,
+            time: newSlot.time,
           },
+        },
+      });
+      if (!targetSlot || targetSlot.isClosed) {
+        throw new AppointmentRequestError('ช่วงเวลาใหม่ไม่ได้เปิดให้จอง', 409);
+      }
+
+      if (currentAppointment.isWaitlisted) {
+        const reservation = await transaction.hospitalSlot.updateMany({
+          where: { id: targetSlot.id, isClosed: false, booked: { lt: targetSlot.capacity } },
+          data: { booked: { increment: 1 } },
         });
-        if (!targetSlot) {
-          throw new AppointmentRequestError('ช่วงเวลาใหม่ไม่ได้เปิดให้จอง', 409);
+        if (reservation.count === 1) {
+          return transaction.appointment.update({
+            where: { id: appointmentId },
+            data: { scheduledAt: appointmentDate, status: 'CONFIRMED', isWaitlisted: false },
+            include: appointmentInclude(),
+          });
         }
 
+        const latestSlot = await transaction.hospitalSlot.findUnique({ where: { id: targetSlot.id } });
+        if (!latestSlot || latestSlot.isClosed) {
+          throw new AppointmentRequestError('ช่วงเวลาใหม่ปิดรับจองแล้ว', 409);
+        }
+        return transaction.appointment.update({
+          where: { id: appointmentId },
+          data: { scheduledAt: appointmentDate, status: 'PENDING', isWaitlisted: true },
+          include: appointmentInclude(),
+        });
+      }
+
+      if (!isSameSlot) {
         const reservation = await transaction.hospitalSlot.updateMany({
           where: { id: targetSlot.id, isClosed: false, booked: { lt: targetSlot.capacity } },
           data: { booked: { increment: 1 } },
@@ -238,12 +283,7 @@ export async function PATCH(req: Request) {
         }
 
         await transaction.hospitalSlot.updateMany({
-          where: {
-            hospitalId: currentAppointment.hospitalId,
-            date: currentSlot.date,
-            time: currentSlot.time,
-            booked: { gt: 0 },
-          },
+          where: { hospitalId: currentAppointment.hospitalId, date: currentSlot.date, time: currentSlot.time, booked: { gt: 0 } },
           data: { booked: { decrement: 1 } },
         });
       }

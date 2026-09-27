@@ -10,6 +10,7 @@ type Appointment = {
   hospitalName: string;
   scheduledAt: string;
   status: string;
+  isWaitlisted: boolean;
   user: { username: string; email: string };
   child: { firstName: string | null; lastName: string | null; dob: string | null };
 };
@@ -285,14 +286,16 @@ export default function AdminDashboardPage() {
                         <td className="p-4"><p className="font-bold">{childName(appointment.child)}</p><p className="mt-1 text-xs text-slate-500">ผู้ปกครอง: {appointment.user.username} · {appointment.user.email}</p></td>
                         <td className="p-4">{appointment.hospitalName}</td>
                         <td className="whitespace-nowrap p-4">{formatDate(appointment.scheduledAt)}</td>
-                        <td className="p-4"><span className={`rounded-full px-3 py-1 text-xs font-bold ${appointment.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-700' : appointment.status === 'CANCELLED' ? 'bg-slate-100 text-slate-600' : appointment.status === 'CONFIRMED' ? 'bg-sky-100 text-sky-700' : 'bg-amber-100 text-amber-700'}`}>{appointment.status === 'COMPLETED' ? 'ฉีดแล้ว' : appointment.status === 'CANCELLED' ? 'ยกเลิก' : appointment.status === 'CONFIRMED' ? 'ยืนยันคิว' : appointment.status === 'PENDING' ? 'รออนุมัติ' : appointment.status}</span></td>
+                        <td className="p-4"><span className={`rounded-full px-3 py-1 text-xs font-bold ${appointment.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-700' : appointment.status === 'CANCELLED' ? 'bg-slate-100 text-slate-600' : appointment.status === 'CONFIRMED' ? 'bg-sky-100 text-sky-700' : 'bg-amber-100 text-amber-700'}`}>{appointment.status === 'COMPLETED' ? 'ฉีดแล้ว' : appointment.status === 'CANCELLED' ? 'ยกเลิก' : appointment.status === 'CONFIRMED' ? 'ยืนยันคิว' : appointment.isWaitlisted ? 'คิวเต็ม · รออนุมัติ' : appointment.status === 'PENDING' ? 'รออนุมัติ' : appointment.status}</span></td>
                         <td className="min-w-[310px] p-4">
                           {['PENDING', 'CONFIRMED'].includes(appointment.status) ? <div className="flex flex-wrap items-center gap-2">
-                            {appointment.status === 'PENDING' && <button disabled={busyKey === `appointment-${appointment.id}`} onClick={() => void updateAppointment(appointment.id, 'CONFIRMED')} className="rounded-lg bg-sky-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">อนุมัติคิว</button>}
-                            <select aria-label={`เลือกวัคซีนสำหรับ${childName(appointment.child)}`} value={selectedVaccines[appointment.id] ?? ''} onChange={(event) => setSelectedVaccines((current) => ({ ...current, [appointment.id]: event.target.value }))} className="max-w-44 rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs">
-                              <option value="">เลือกวัคซีน</option>{availableVaccines.map((vaccine) => <option key={vaccine.id} value={vaccine.id}>{vaccine.name} (คงเหลือ {vaccine.stock})</option>)}
-                            </select>
-                            <button disabled={!selectedVaccines[appointment.id] || busyKey === `complete-${appointment.id}`} onClick={() => void completeAppointment(appointment.id)} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">ยืนยันฉีดแล้ว</button>
+                            {appointment.status === 'PENDING' && <button disabled={busyKey === `appointment-${appointment.id}`} onClick={() => void updateAppointment(appointment.id, 'CONFIRMED')} className="rounded-lg bg-sky-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">{appointment.isWaitlisted ? 'รับคิวเข้ารอบ' : 'อนุมัติคิว'}</button>}
+                            {!appointment.isWaitlisted && <>
+                              <select aria-label={`เลือกวัคซีนสำหรับ${childName(appointment.child)}`} value={selectedVaccines[appointment.id] ?? ''} onChange={(event) => setSelectedVaccines((current) => ({ ...current, [appointment.id]: event.target.value }))} className="max-w-44 rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs">
+                                <option value="">เลือกวัคซีน</option>{availableVaccines.map((vaccine) => <option key={vaccine.id} value={vaccine.id}>{vaccine.name} (คงเหลือ {vaccine.stock})</option>)}
+                              </select>
+                              <button disabled={!selectedVaccines[appointment.id] || busyKey === `complete-${appointment.id}`} onClick={() => void completeAppointment(appointment.id)} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">ยืนยันฉีดแล้ว</button>
+                            </>}
                             <button disabled={busyKey === `appointment-${appointment.id}`} onClick={() => { if (window.confirm('ยืนยันยกเลิกคิวนี้หรือไม่? ระบบจะคืนที่นั่งให้รอบเวลา')) void updateAppointment(appointment.id, 'CANCELLED'); }} className="rounded-lg bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 disabled:opacity-50">ยกเลิก</button>
                           </div> : <span className="text-xs text-slate-400">ไม่มีการดำเนินการ</span>}
                         </td>

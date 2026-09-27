@@ -11,7 +11,7 @@ type HospitalOption = {
   id: string;
   name: string;
   distance: string;
-  availableDates: { date: string; dateString: string; slots: string[] }[];
+  availableDates: { date: string; dateString: string; slots: string[]; fullSlots: string[] }[];
 };
 
 type Appointment = {
@@ -20,6 +20,7 @@ type Appointment = {
   hospitalId: string | null;
   scheduledAt: string;
   status: string;
+  isWaitlisted: boolean;
   hospital: { slots: { date: string; time: string; booked: number; capacity: number }[] } | null;
 };
 
@@ -81,7 +82,7 @@ export default function ColorfulDashboard() {
   const [activeTab, setActiveTab] = useState<'overview' | 'appointments' | 'schedule' | 'tips'>('overview');
   const [isLocating, setIsLocating] = useState(false);
   const [selectedHospital, setSelectedHospital] = useState<string | null>(null);
-  const [selectedDateSlot, setSelectedDateSlot] = useState<{date: string, dateString: string, time: string} | null>(null);
+  const [selectedDateSlot, setSelectedDateSlot] = useState<{date: string, dateString: string, time: string, isWaitlistRequest?: boolean} | null>(null);
   const [vaccineToBook, setVaccineToBook] = useState<{ name: string; age: string } | null>(null);
   const [realHospitals, setRealHospitals] = useState<HospitalOption[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -392,7 +393,11 @@ export default function ColorfulDashboard() {
       ));
       setSelectedHospital(null);
       setSelectedDateSlot(null);
-      notify('success', 'บันทึกนัดหมายแล้ว', `${hospital.name} · ${selectedDateSlot.date} เวลา ${selectedDateSlot.time} น.`);
+      notify(
+        data.waitlisted ? 'info' : 'success',
+        data.waitlisted ? 'คิวเต็ม กำลังรออนุมัติ' : 'ยืนยันการจองแล้ว',
+        `${hospital.name} · ${selectedDateSlot.date} เวลา ${selectedDateSlot.time} น.`
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : 'ไม่สามารถบันทึกนัดหมายได้';
       setAppointmentError(message);
@@ -869,11 +874,27 @@ export default function ColorfulDashboard() {
                                               key={time}
                                               onClick={(event) => {
                                                 event.stopPropagation();
-                                                setSelectedDateSlot({ date: availableDate.date, dateString: availableDate.dateString, time });
+                                                setSelectedDateSlot({ date: availableDate.date, dateString: availableDate.dateString, time, isWaitlistRequest: false });
                                               }}
                                               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${isSelected ? 'bg-rose-500 text-white shadow-md shadow-rose-200' : 'bg-white border border-slate-200 text-slate-600 hover:border-rose-300 hover:text-rose-600'}`}
                                             >
                                               {time} น.
+                                            </button>
+                                          );
+                                        })}
+                                        {availableDate.fullSlots.map((time) => {
+                                          const isSelected = selectedDateSlot?.dateString === availableDate.dateString && selectedDateSlot?.time === time;
+                                          return (
+                                            <button
+                                              key={`waitlist-${time}`}
+                                              onClick={(event) => {
+                                                event.stopPropagation();
+                                                setSelectedDateSlot({ date: availableDate.date, dateString: availableDate.dateString, time, isWaitlistRequest: true });
+                                              }}
+                                              className={`px-3 py-1.5 rounded-lg border text-xs font-bold transition-all ${isSelected ? 'border-amber-500 bg-amber-500 text-white shadow-md shadow-amber-200' : 'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100'}`}
+                                              title="รอบนี้เต็ม แตะเพื่อส่งคำขอรออนุมัติ"
+                                            >
+                                              {time} น. · เต็ม / รอคิว
                                             </button>
                                           );
                                         })}
@@ -897,7 +918,7 @@ export default function ColorfulDashboard() {
                       disabled={isSavingAppointment}
                       className="w-full py-4 px-4 rounded-2xl bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 text-white font-bold text-base transition-all shadow-lg shadow-pink-200 disabled:opacity-60"
                     >
-                      {isSavingAppointment ? 'กำลังบันทึกนัดหมาย...' : 'ยืนยันการนัดหมาย'}
+                      {isSavingAppointment ? 'กำลังส่งคำขอ...' : selectedDateSlot.isWaitlistRequest ? 'ส่งคำขอรออนุมัติ' : 'ยืนยันการจอง'}
                     </button>
                   </div>
                 )}
@@ -924,7 +945,7 @@ export default function ColorfulDashboard() {
                         `${new Date(slot.date).toISOString().slice(0, 10)}|${slot.time}` === currentSlotKey
                       ) ?? [];
                       const statusLabel = appointment.status === 'PENDING'
-                        ? 'รอยืนยัน'
+                        ? appointment.isWaitlisted ? 'คิวเต็ม • รออนุมัติ' : 'รอยืนยัน'
                         : appointment.status === 'CANCELLED'
                           ? 'ยกเลิกแล้ว'
                           : appointment.status === 'COMPLETED'
