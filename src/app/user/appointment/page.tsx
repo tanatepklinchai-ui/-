@@ -1,8 +1,10 @@
 // src/app/user/appointment/page.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
+import NotificationToast from '@/components/NotificationToast';
+import type { ToastMessage } from '@/components/NotificationToast';
 
 interface ChildOption {
   id: string;
@@ -23,7 +25,11 @@ export default function AppointmentPage() {
   const [cancellationTarget, setCancellationTarget] = useState<AppointmentItem | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState('');
+  const [toast, setToast] = useState<ToastMessage | null>(null);
+  const dismissToast = useCallback(() => setToast(null), []);
+  const notify = useCallback((type: ToastMessage['type'], title: string, description?: string) => {
+    setToast({ type, title, description });
+  }, []);
   const visibleAppointments = appointments.filter((appointment) => appointment.status !== 'CANCELLED');
 
   useEffect(() => {
@@ -37,10 +43,10 @@ export default function AppointmentPage() {
         setSelectedChildId(loadedChildren[0]?.id ?? '');
       })
       .catch((error) => {
-        setMessage(error instanceof Error ? error.message : 'ไม่สามารถโหลดข้อมูลเด็กได้');
+        notify('error', 'โหลดข้อมูลเด็กไม่สำเร็จ', error instanceof Error ? error.message : 'กรุณาลองใหม่อีกครั้ง');
         setLoading(false);
       });
-  }, []);
+  }, [notify]);
 
   useEffect(() => {
     if (!selectedChildId) {
@@ -55,18 +61,17 @@ export default function AppointmentPage() {
         setAppointments(data.appointments ?? []);
       })
       .catch((error) => {
-        if (!controller.signal.aborted) setMessage(error instanceof Error ? error.message : 'ไม่สามารถโหลดนัดหมายได้');
+        if (!controller.signal.aborted) notify('error', 'โหลดนัดหมายไม่สำเร็จ', error instanceof Error ? error.message : 'กรุณาลองใหม่อีกครั้ง');
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
       });
 
     return () => controller.abort();
-  }, [selectedChildId]);
+  }, [notify, selectedChildId]);
 
   const handleCancelAppointment = async (id: string) => {
     setIsCancelling(true);
-    setMessage('');
     try {
       const response = await fetch('/api/appointments', {
         method: 'PATCH',
@@ -77,8 +82,9 @@ export default function AppointmentPage() {
       if (!response.ok) throw new Error(data.error || 'ไม่สามารถยกเลิกนัดหมายได้');
       setAppointments((current) => current.filter((appointment) => appointment.id !== id));
       setCancellationTarget(null);
+      notify('success', 'ยกเลิกนัดหมายแล้ว', 'คืนที่นั่งให้รอบเวลาเรียบร้อย');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'ไม่สามารถยกเลิกนัดหมายได้');
+      notify('error', 'ยกเลิกนัดหมายไม่สำเร็จ', error instanceof Error ? error.message : 'กรุณาลองใหม่อีกครั้ง');
     } finally {
       setIsCancelling(false);
     }
@@ -86,6 +92,7 @@ export default function AppointmentPage() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800">
+      <NotificationToast message={toast} onDismiss={dismissToast} />
       <nav className="bg-white border-b border-slate-100 px-6 py-4 flex justify-between items-center sticky top-0 z-10 shadow-xs">
         <Link href="/user/dashboard" className="flex items-center space-x-2">
           <div className="w-3 h-3 rounded-full bg-teal-500"></div>
@@ -100,12 +107,6 @@ export default function AppointmentPage() {
       </nav>
 
       <main className="max-w-4xl mx-auto p-6 md:p-10 space-y-8">
-        {message && (
-          <div className="p-3.5 rounded-xl bg-teal-50 border border-teal-100 text-teal-800 text-xs font-medium">
-            {message}
-          </div>
-        )}
-
         {/* เลือกเด็กและไปยังระบบจอง */}
         <section className="bg-white rounded-2xl border border-slate-100 p-6 md:p-8 shadow-xs">
           <h2 className="text-lg font-semibold text-slate-800 mb-1">นัดหมายรับวัคซีน</h2>
@@ -214,7 +215,6 @@ export default function AppointmentPage() {
                   <p className="font-bold text-slate-800">{cancellationTarget.hospitalName}</p>
                   <p className="mt-1 text-xs text-slate-500">{new Date(cancellationTarget.scheduledAt).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' })} น.</p>
                 </div>
-                {message && <p role="alert" className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{message}</p>}
                 <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                   <button type="button" disabled={isCancelling} onClick={() => setCancellationTarget(null)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-bold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50">กลับไปดูนัดหมาย</button>
                   <button type="button" disabled={isCancelling} onClick={() => void handleCancelAppointment(cancellationTarget.id)} className="rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-rose-700 disabled:cursor-wait disabled:opacity-60">{isCancelling ? 'กำลังยกเลิก...' : 'ยืนยันยกเลิกนัด'}</button>

@@ -1,9 +1,11 @@
 // src/app/user/dashboard/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { VACCINE_SCHEDULE } from '@/lib/vaccineSchedule';
 import { calculateAgeDisplay } from '@/lib/utils/formatAge';
+import NotificationToast from '@/components/NotificationToast';
+import type { ToastMessage } from '@/components/NotificationToast';
 
 type HospitalOption = {
   id: string;
@@ -85,6 +87,7 @@ export default function ColorfulDashboard() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [cancellationTarget, setCancellationTarget] = useState<Appointment | null>(null);
   const [isCancellingAppointment, setIsCancellingAppointment] = useState(false);
+  const [toast, setToast] = useState<ToastMessage | null>(null);
   const [appointmentsLoading, setAppointmentsLoading] = useState(true);
   const [appointmentError, setAppointmentError] = useState('');
   const [isSavingAppointment, setIsSavingAppointment] = useState(false);
@@ -104,6 +107,11 @@ export default function ColorfulDashboard() {
   const [vaccineRecordForm, setVaccineRecordForm] = useState({ administeredDate: '', hospitalName: '' });
   const [isSavingVaccineRecord, setIsSavingVaccineRecord] = useState(false);
   const [vaccineError, setVaccineError] = useState('');
+  const dismissToast = useCallback(() => setToast(null), []);
+
+  const notify = (type: ToastMessage['type'], title: string, description?: string) => {
+    setToast({ type, title, description });
+  };
 
   useEffect(() => {
     if (!selectedChildId) {
@@ -226,6 +234,7 @@ export default function ColorfulDashboard() {
         : [...current, savedChild]);
       setSelectedChildId(savedChild.id);
       setIsAddingChild(false);
+      notify('success', isAddingChild ? 'เพิ่มข้อมูลเด็กแล้ว' : 'บันทึกข้อมูลเด็กแล้ว');
     } catch (error) {
       setProfileError(error instanceof Error ? error.message : 'ไม่สามารถบันทึกข้อมูลเด็กได้');
     } finally {
@@ -287,6 +296,7 @@ export default function ColorfulDashboard() {
       setVaccineRecords((current) => [data.record, ...current]);
       setRecordingVaccineCode(null);
       setVaccineRecordForm({ administeredDate: '', hospitalName: '' });
+      notify('success', 'ส่งประวัติวัคซีนให้ตรวจสอบแล้ว', 'รายการจะแสดงว่า “รอตรวจ” จนกว่าเจ้าหน้าที่จะยืนยัน');
     } catch (error) {
       setVaccineError(error instanceof Error ? error.message : 'ไม่สามารถบันทึกประวัติวัคซีนได้');
     } finally {
@@ -319,7 +329,7 @@ export default function ColorfulDashboard() {
   const handleFindNearby = () => {
     setIsLocating(true);
     if (!navigator.geolocation) {
-      alert('อุปกรณ์ของคุณไม่รองรับการระบุตำแหน่ง');
+      notify('error', 'อุปกรณ์นี้ไม่รองรับ GPS', 'ลองค้นหาสถานพยาบาลจากอุปกรณ์ที่เปิดใช้ตำแหน่งได้');
       setIsLocating(false);
       return;
     }
@@ -333,14 +343,19 @@ export default function ColorfulDashboard() {
           setRealHospitals(data.hospitals ?? []);
           setSelectedHospital(null);
           setSelectedDateSlot(null);
-        } catch {
-          alert('เกิดข้อผิดพลาดในการดึงข้อมูลโรงพยาบาล');
+        } catch (error) {
+          notify('error', 'ค้นหาสถานพยาบาลไม่สำเร็จ', error instanceof Error ? error.message : 'กรุณาลองใหม่อีกครั้ง');
         } finally {
           setIsLocating(false);
         }
       },
       (error) => {
-        alert('กรุณาเปิดใช้งาน GPS และอนุญาตการเข้าถึงตำแหน่งที่ตั้ง');
+        const description = error.code === error.PERMISSION_DENIED
+          ? 'อนุญาตการเข้าถึงตำแหน่งจากการตั้งค่าเบราว์เซอร์ก่อนค้นหา'
+          : error.code === error.TIMEOUT
+            ? 'การค้นหาตำแหน่งใช้เวลานานเกินไป กรุณาลองอีกครั้ง'
+            : 'ตรวจสอบการตั้งค่าตำแหน่งของอุปกรณ์แล้วลองใหม่';
+        notify('error', 'ระบุตำแหน่งไม่ได้', description);
         setIsLocating(false);
       },
       { enableHighAccuracy: true }
@@ -353,7 +368,7 @@ export default function ColorfulDashboard() {
       return;
     }
     if (!selectedHospital || !selectedDateSlot) {
-      alert('กรุณาเลือกโรงพยาบาลและเวลาที่ต้องการนัดหมาย');
+      notify('info', 'เลือกสถานพยาบาลและรอบเวลาก่อน', 'เลือกสถานพยาบาลใกล้คุณ แล้วแตะเวลาที่ต้องการจอง');
       return;
     }
 
@@ -377,9 +392,11 @@ export default function ColorfulDashboard() {
       ));
       setSelectedHospital(null);
       setSelectedDateSlot(null);
-      alert('🎉 บันทึกนัดหมายเรียบร้อยแล้ว');
+      notify('success', 'บันทึกนัดหมายแล้ว', `${hospital.name} · ${selectedDateSlot.date} เวลา ${selectedDateSlot.time} น.`);
     } catch (error) {
-      setAppointmentError(error instanceof Error ? error.message : 'ไม่สามารถบันทึกนัดหมายได้');
+      const message = error instanceof Error ? error.message : 'ไม่สามารถบันทึกนัดหมายได้';
+      setAppointmentError(message);
+      notify('error', 'จองนัดหมายไม่สำเร็จ', message);
     } finally {
       setIsSavingAppointment(false);
     }
@@ -398,8 +415,11 @@ export default function ColorfulDashboard() {
       if (!response.ok) throw new Error(data.error || 'ไม่สามารถยกเลิกนัดหมายได้');
       setAppointments((current) => current.filter((appointment) => appointment.id !== appointmentId));
       setCancellationTarget(null);
+      notify('success', 'ยกเลิกนัดหมายแล้ว', 'คืนที่นั่งให้รอบเวลาเรียบร้อย');
     } catch (error) {
-      setAppointmentError(error instanceof Error ? error.message : 'ไม่สามารถยกเลิกนัดหมายได้');
+      const message = error instanceof Error ? error.message : 'ไม่สามารถยกเลิกนัดหมายได้';
+      setAppointmentError(message);
+      notify('error', 'ยกเลิกนัดหมายไม่สำเร็จ', message);
     } finally {
       setIsCancellingAppointment(false);
     }
@@ -409,12 +429,14 @@ export default function ColorfulDashboard() {
     const [date, time] = editSlotKey.split('|');
     if (!date || !time) {
       setAppointmentError('กรุณาเลือกช่วงเวลาใหม่');
+      notify('info', 'ยังไม่ได้เลือกเวลาใหม่', 'เลือกหนึ่งในรอบเวลาที่ยังว่าง');
       return;
     }
 
     const scheduledAt = new Date(`${date}T${time}:00+07:00`);
     if (!Number.isFinite(scheduledAt.getTime()) || scheduledAt <= new Date()) {
       setAppointmentError('กรุณาเลือกวันและเวลาในอนาคต');
+      notify('error', 'เวลาใหม่นี้ใช้ไม่ได้', 'กรุณาเลือกวันและเวลาในอนาคต');
       return;
     }
 
@@ -432,13 +454,17 @@ export default function ColorfulDashboard() {
       setEditingAppointmentId(null);
       setEditSlotKey('');
       setAppointmentError('');
+      notify('success', 'เปลี่ยนเวลานัดแล้ว');
     } catch (error) {
-      setAppointmentError(error instanceof Error ? error.message : 'ไม่สามารถเปลี่ยนเวลานัดหมายได้');
+      const message = error instanceof Error ? error.message : 'ไม่สามารถเปลี่ยนเวลานัดหมายได้';
+      setAppointmentError(message);
+      notify('error', 'เปลี่ยนเวลานัดไม่สำเร็จ', message);
     }
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 text-slate-800 font-sans flex flex-col md:flex-row">
+      <NotificationToast message={toast} onDismiss={dismissToast} />
       
       {/* 1. SIDEBAR (สำหรับหน้าจอคอมพิวเตอร์ - ซ่อนในมือถือ) */}
       <aside className="hidden md:flex w-72 bg-white/80 backdrop-blur-xl border-r border-indigo-50 flex-col justify-between p-6 sticky top-0 h-screen shadow-sm z-30">
