@@ -43,50 +43,45 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    const { childId, vaccineCode, administeredDate, hospitalName } = body;
-    const vaccine = VACCINE_SCHEDULE.find((item) => item.code === vaccineCode);
+    const { childId, vaccineCode, vaccineCatalogId, administeredDate, hospitalName } = body;
     const date = new Date(administeredDate);
 
-    if (
-      !vaccine ||
-      typeof childId !== 'string' ||
-      typeof administeredDate !== 'string' ||
-      !Number.isFinite(date.getTime()) ||
-      date > new Date() ||
-      (hospitalName !== undefined && typeof hospitalName !== 'string')
-    ) {
+    if (!childId || !administeredDate || !Number.isFinite(date.getTime()) || date > new Date()) {
       return NextResponse.json({ error: 'ข้อมูลประวัติวัคซีนไม่ถูกต้อง' }, { status: 400 });
+    }
+
+    let finalVaccineCode = vaccineCode;
+    let finalVaccineName = '';
+    
+    // ตรวจสอบว่าเป็นวัคซีนตามตาราง หรือ วัคซีนทางเลือก
+    if (vaccineCode) {
+      const vaccine = VACCINE_SCHEDULE.find((item) => item.code === vaccineCode);
+      if (!vaccine) return NextResponse.json({ error: 'ไม่พบวัคซีนในระบบ' }, { status: 400 });
+      finalVaccineName = `${vaccine.name} ${vaccine.dose}`;
+    } else if (vaccineCatalogId) {
+      const catalog = await prisma.vaccineCatalog.findUnique({ where: { id: vaccineCatalogId } });
+      if (!catalog) return NextResponse.json({ error: 'ไม่พบวัคซีนทางเลือกในระบบ' }, { status: 400 });
+      finalVaccineCode = catalog.code;
+      finalVaccineName = catalog.name;
+    } else {
+      return NextResponse.json({ error: 'กรุณาระบุวัคซีน' }, { status: 400 });
     }
 
     const child = await prisma.child.findFirst({
       where: { id: childId, userId: session.userId },
       select: { id: true, dob: true },
     });
-    if (!child?.dob) {
-      return NextResponse.json({ error: 'กรุณาบันทึกวันเกิดของเด็กก่อนเพิ่มประวัติวัคซีน' }, { status: 400 });
-    }
-    if (date < child.dob) {
-      return NextResponse.json({ error: 'วันที่รับวัคซีนต้องไม่ก่อนวันเกิด' }, { status: 400 });
-    }
-
-    const existingRecord = await prisma.vaccineRecord.findFirst({
-      where: {
-        userId: session.userId,
-        childId: child.id,
-        vaccineCode,
-        verificationStatus: { in: ['PENDING', 'VERIFIED'] },
-      },
-    });
-    if (existingRecord) {
-      return NextResponse.json({ error: 'ประวัติวัคซีนรายการนี้ถูกรายงานหรือยืนยันแล้ว' }, { status: 409 });
-    }
+    
+    if (!child?.dob) return NextResponse.json({ error: 'กรุณาบันทึกวันเกิดของเด็กก่อน' }, { status: 400 });
+    if (date < child.dob) return NextResponse.json({ error: 'วันที่รับวัคซีนต้องไม่ก่อนวันเกิด' }, { status: 400 });
 
     const record = await prisma.vaccineRecord.create({
       data: {
         userId: session.userId,
         childId: child.id,
-        vaccineCode,
-        vaccineName: `${vaccine.name} ${vaccine.dose}`,
+        vaccineCode: finalVaccineCode,
+        vaccineCatalogId: vaccineCatalogId || null,
+        vaccineName: finalVaccineName,
         administeredDate: date,
         hospitalName: hospitalName?.trim() || 'ไม่ระบุในสมุดวัคซีน',
         source: 'PARENT_REPORTED',

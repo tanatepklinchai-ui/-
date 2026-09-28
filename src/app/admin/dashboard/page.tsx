@@ -11,6 +11,7 @@ type Appointment = {
   scheduledAt: string;
   status: string;
   isWaitlisted: boolean;
+  requestedVaccine?: string | null; // <--- เพิ่มบรรทัดนี้
   user: { username: string; email: string };
   child: { firstName: string | null; lastName: string | null; dob: string | null };
 };
@@ -82,6 +83,10 @@ export default function AdminDashboardPage() {
   const [busyKey, setBusyKey] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+
+  // States สำหรับเลื่อนนัดหมาย
+  const [rescheduleTarget, setRescheduleTarget] = useState<Appointment | null>(null);
+  const [newScheduledAt, setNewScheduledAt] = useState('');
 
   const loadData = useCallback(async () => {
     try {
@@ -157,14 +162,14 @@ export default function AdminDashboardPage() {
     }
   }
 
-  async function updateAppointment(appointmentId: string, status: 'CONFIRMED' | 'CANCELLED') {
+  async function updateAppointment(appointmentId: string, status: 'CONFIRMED' | 'CANCELLED' | 'NO_SHOW') {
     await performAction(`appointment-${appointmentId}`, async () => {
       const response = await fetch('/api/admin/appointments', {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ appointmentId, status }),
       });
       await readJson(response);
-    }, status === 'CONFIRMED' ? 'อนุมัติการจองแล้ว' : 'ยกเลิกคิวและคืนที่นั่งแล้ว');
+    }, status === 'CONFIRMED' ? 'อนุมัติการจองแล้ว' : status === 'CANCELLED' ? 'ยกเลิกคิวและคืนที่นั่งแล้ว' : 'บันทึกสถานะไม่มาตามนัดแล้ว');
   }
 
   async function completeAppointment(appointmentId: string) {
@@ -177,6 +182,26 @@ export default function AdminDashboardPage() {
       });
       await readJson(response);
     }, 'ยืนยันการฉีดแล้ว บันทึกประวัติเด็กและตัดสต็อกเรียบร้อย');
+  }
+
+  async function submitReschedule(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!rescheduleTarget || !newScheduledAt) return;
+
+    await performAction(`reschedule-${rescheduleTarget.id}`, async () => {
+      const response = await fetch('/api/admin/appointments', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          appointmentId: rescheduleTarget.id,
+          status: 'RESCHEDULED',
+          newScheduledAt: new Date(newScheduledAt).toISOString()
+        }),
+      });
+      await readJson(response);
+      setRescheduleTarget(null);
+      setNewScheduledAt('');
+    }, 'เลื่อนนัดหมายและส่งอีเมลแจ้งผู้ปกครองแล้ว');
   }
 
   async function saveSlot(event: FormEvent<HTMLFormElement>) {
@@ -245,7 +270,7 @@ export default function AdminDashboardPage() {
   }
 
   const availableVaccines = vaccines.filter((vaccine) => vaccine.isActive && vaccine.stock > 0);
-  const pendingAppointments = appointments.filter((appointment) => ['PENDING', 'CONFIRMED'].includes(appointment.status));
+  const pendingAppointments = appointments.filter((appointment) => ['PENDING', 'CONFIRMED', 'RESCHEDULED'].includes(appointment.status));
 
   return (
     <main className="min-h-screen bg-slate-100 text-slate-900">
@@ -281,26 +306,49 @@ export default function AdminDashboardPage() {
                 <table className="w-full min-w-[900px] text-left text-sm">
                   <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="p-4">เด็ก / ผู้ปกครอง</th><th className="p-4">สถานพยาบาล</th><th className="p-4">วันและเวลา</th><th className="p-4">สถานะ</th><th className="p-4">จัดการ</th></tr></thead>
                   <tbody className="divide-y divide-slate-100">
-                    {appointments.length === 0 ? <tr><td colSpan={5} className="p-10 text-center text-slate-500">ยังไม่มีรายการนัดหมาย</td></tr> : appointments.map((appointment) => (
-                      <tr key={appointment.id}>
-                        <td className="p-4"><p className="font-bold">{childName(appointment.child)}</p><p className="mt-1 text-xs text-slate-500">ผู้ปกครอง: {appointment.user.username} · {appointment.user.email}</p></td>
-                        <td className="p-4">{appointment.hospitalName}</td>
-                        <td className="whitespace-nowrap p-4">{formatDate(appointment.scheduledAt)}</td>
-                        <td className="p-4"><span className={`rounded-full px-3 py-1 text-xs font-bold ${appointment.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-700' : appointment.status === 'CANCELLED' ? 'bg-slate-100 text-slate-600' : appointment.status === 'CONFIRMED' ? 'bg-sky-100 text-sky-700' : 'bg-amber-100 text-amber-700'}`}>{appointment.status === 'COMPLETED' ? 'ฉีดแล้ว' : appointment.status === 'CANCELLED' ? 'ยกเลิก' : appointment.status === 'CONFIRMED' ? 'ยืนยันคิว' : appointment.isWaitlisted ? 'คิวเต็ม · รออนุมัติ' : appointment.status === 'PENDING' ? 'รออนุมัติ' : appointment.status}</span></td>
-                        <td className="min-w-[310px] p-4">
-                          {['PENDING', 'CONFIRMED'].includes(appointment.status) ? <div className="flex flex-wrap items-center gap-2">
-                            {appointment.status === 'PENDING' && <button disabled={busyKey === `appointment-${appointment.id}`} onClick={() => void updateAppointment(appointment.id, 'CONFIRMED')} className="rounded-lg bg-sky-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">{appointment.isWaitlisted ? 'รับคิวเข้ารอบ' : 'อนุมัติคิว'}</button>}
-                            {!appointment.isWaitlisted && <>
-                              <select aria-label={`เลือกวัคซีนสำหรับ${childName(appointment.child)}`} value={selectedVaccines[appointment.id] ?? ''} onChange={(event) => setSelectedVaccines((current) => ({ ...current, [appointment.id]: event.target.value }))} className="max-w-44 rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs">
-                                <option value="">เลือกวัคซีน</option>{availableVaccines.map((vaccine) => <option key={vaccine.id} value={vaccine.id}>{vaccine.name} (คงเหลือ {vaccine.stock})</option>)}
-                              </select>
-                              <button disabled={!selectedVaccines[appointment.id] || busyKey === `complete-${appointment.id}`} onClick={() => void completeAppointment(appointment.id)} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">ยืนยันฉีดแล้ว</button>
-                            </>}
-                            <button disabled={busyKey === `appointment-${appointment.id}`} onClick={() => { if (window.confirm('ยืนยันยกเลิกคิวนี้หรือไม่? ระบบจะคืนที่นั่งให้รอบเวลา')) void updateAppointment(appointment.id, 'CANCELLED'); }} className="rounded-lg bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 disabled:opacity-50">ยกเลิก</button>
-                          </div> : <span className="text-xs text-slate-400">ไม่มีการดำเนินการ</span>}
-                        </td>
-                      </tr>
-                    ))}
+                    {appointments.length === 0 ? <tr><td colSpan={5} className="p-10 text-center text-slate-500">ยังไม่มีรายการนัดหมาย</td></tr> : appointments.map((appointment) => {
+                      const isPast = new Date(appointment.scheduledAt) < new Date();
+                      
+                      return (
+                        <tr key={appointment.id} className={isPast && ['PENDING', 'CONFIRMED', 'RESCHEDULED'].includes(appointment.status) ? 'bg-amber-50/50' : ''}>
+                          <td className="p-4"><p className="font-bold">{childName(appointment.child)}</p>
+                          {appointment.requestedVaccine && (
+    <p className="mt-1 inline-block rounded bg-teal-50 px-2 py-0.5 text-[11px] font-bold text-teal-700 border border-teal-100">
+      ต้องการ: {appointment.requestedVaccine}
+    </p>
+  )}
+                          <p className="mt-1 text-xs text-slate-500">ผู้ปกครอง: {appointment.user.username} · {appointment.user.email}</p></td>
+                          <td className="p-4">{appointment.hospitalName}</td>
+                          <td className="whitespace-nowrap p-4">{formatDate(appointment.scheduledAt)} {isPast && ['PENDING', 'CONFIRMED', 'RESCHEDULED'].includes(appointment.status) && <span className="ml-2 rounded text-[10px] font-bold text-rose-500">(เลยกำหนด)</span>}</td>
+                          <td className="p-4">
+                            <span className={`rounded-full px-3 py-1 text-xs font-bold ${appointment.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-700' : appointment.status === 'CANCELLED' ? 'bg-slate-100 text-slate-600' : appointment.status === 'NO_SHOW' ? 'bg-rose-100 text-rose-700' : appointment.status === 'RESCHEDULED' ? 'bg-indigo-100 text-indigo-700' : appointment.status === 'CONFIRMED' ? 'bg-sky-100 text-sky-700' : 'bg-amber-100 text-amber-700'}`}>
+                              {appointment.status === 'COMPLETED' ? 'ฉีดแล้ว' : appointment.status === 'CANCELLED' ? 'ยกเลิก' : appointment.status === 'NO_SHOW' ? 'ไม่มาตามนัด' : appointment.status === 'RESCHEDULED' ? 'เลื่อนนัด' : appointment.status === 'CONFIRMED' ? 'ยืนยันคิว' : appointment.isWaitlisted ? 'คิวเต็ม · รออนุมัติ' : appointment.status === 'PENDING' ? 'รออนุมัติ' : appointment.status}
+                            </span>
+                          </td>
+                          <td className="min-w-[310px] p-4">
+                            {['PENDING', 'CONFIRMED', 'RESCHEDULED'].includes(appointment.status) ? (
+                              <div className="flex flex-wrap items-center gap-2">
+                                {/* ปุ่มสำหรับอนุมัติและฉีดวัคซีน */}
+                                {appointment.status === 'PENDING' && <button disabled={busyKey === `appointment-${appointment.id}`} onClick={() => void updateAppointment(appointment.id, 'CONFIRMED')} className="rounded-lg bg-sky-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">{appointment.isWaitlisted ? 'รับคิวเข้ารอบ' : 'อนุมัติคิว'}</button>}
+                                {!appointment.isWaitlisted && <>
+                                  <select aria-label={`เลือกวัคซีนสำหรับ${childName(appointment.child)}`} value={selectedVaccines[appointment.id] ?? ''} onChange={(event) => setSelectedVaccines((current) => ({ ...current, [appointment.id]: event.target.value }))} className="max-w-44 rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs">
+                                    <option value="">เลือกวัคซีน</option>{availableVaccines.map((vaccine) => <option key={vaccine.id} value={vaccine.id}>{vaccine.name} (คงเหลือ {vaccine.stock})</option>)}
+                                  </select>
+                                  <button disabled={!selectedVaccines[appointment.id] || busyKey === `complete-${appointment.id}`} onClick={() => void completeAppointment(appointment.id)} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">ยืนยันฉีดแล้ว</button>
+                                </>}
+
+                                {/* ปุ่มยกเลิกของเดิม และปุ่มจัดการกรณีไม่มาตามนัด */}
+                                <div className="mt-1 flex w-full gap-2">
+                                  <button disabled={busyKey === `appointment-${appointment.id}`} onClick={() => { if (window.confirm('ยืนยันยกเลิกคิวนี้หรือไม่? ระบบจะคืนที่นั่งให้รอบเวลา')) void updateAppointment(appointment.id, 'CANCELLED'); }} className="rounded-lg bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50">ยกเลิก</button>
+                                  <button disabled={busyKey === `appointment-${appointment.id}`} onClick={() => { if (window.confirm('ยืนยันว่าคนไข้ไม่มาตามนัด?')) void updateAppointment(appointment.id, 'NO_SHOW'); }} className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200 disabled:opacity-50">❌ ไม่มาตามนัด</button>
+                                  <button disabled={busyKey === `appointment-${appointment.id}`} onClick={() => setRescheduleTarget(appointment)} className="rounded-lg bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 hover:bg-indigo-100 disabled:opacity-50">🗓️ เลื่อนนัด</button>
+                                </div>
+                              </div>
+                            ) : <span className="text-xs text-slate-400">ไม่มีการดำเนินการ</span>}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -369,6 +417,54 @@ export default function AdminDashboardPage() {
           )}
         </>}
       </div>
+
+      {/* ป๊อปอัพสำหรับเลื่อนนัดหมาย */}
+      {rescheduleTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
+          <form onSubmit={submitReschedule} className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl animate-fade-in-up">
+            <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2"><span>🗓️</span> เลื่อนนัดหมาย</h3>
+            <p className="mt-1 text-sm text-slate-500">
+              กำลังเลื่อนนัดของ: <strong>{childName(rescheduleTarget.child)}</strong>
+            </p>
+            <label className="mt-5 block text-sm font-bold text-slate-700">
+              ระบุวันและเวลาใหม่ <span className="text-rose-500">*</span>
+              <input 
+                type="datetime-local" 
+                required 
+                value={newScheduledAt} 
+                onChange={(e) => setNewScheduledAt(e.target.value)} 
+                className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all" 
+              />
+            </label>
+            <div className="mt-6 flex justify-end gap-3 border-t border-slate-100 pt-4">
+              <button 
+                type="button" 
+                onClick={() => setRescheduleTarget(null)} 
+                className="rounded-xl px-4 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100 transition"
+              >
+                ยกเลิก
+              </button>
+              <button 
+                type="submit" 
+                disabled={busyKey === `reschedule-${rescheduleTarget.id}`} 
+                className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-50 transition shadow-sm"
+              >
+                {busyKey === `reschedule-${rescheduleTarget.id}` ? 'กำลังดำเนินการ...' : 'ยืนยันเลื่อนนัด'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      <style dangerouslySetInnerHTML={{__html: `
+        @keyframes fadeInUp {
+          from { opacity: 0; transform: translateY(10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in-up {
+          animation: fadeInUp 0.2s ease-out forwards;
+        }
+      `}} />
     </main>
   );
 }

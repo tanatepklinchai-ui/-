@@ -92,7 +92,7 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    const { childId, hospitalId, scheduledAt } = body;
+    const { childId, hospitalId, scheduledAt, requestedVaccine } = body;
     const appointmentDate = new Date(scheduledAt);
 
     if (
@@ -165,6 +165,7 @@ export async function POST(req: Request) {
           scheduledAt: appointmentDate,
           status,
           isWaitlisted,
+          requestedVaccine,
         },
         include: appointmentInclude(),
       });

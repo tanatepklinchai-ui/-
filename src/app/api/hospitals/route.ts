@@ -95,84 +95,124 @@ function readCoordinate(value: string | null, fallback: number, min: number, max
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
+  const searchQuery = searchParams.get('search');
   const latitude = readCoordinate(searchParams.get('lat'), DEFAULT_LATITUDE, -90, 90);
   const longitude = readCoordinate(searchParams.get('lng'), DEFAULT_LONGITUDE, -180, 180);
 
-  if (latitude === null || longitude === null) {
-    return NextResponse.json({ error: 'พิกัดไม่ถูกต้อง' }, { status: 400 });
+  // ตรวจสอบพารามิเตอร์ (ต้องมีอย่างใดอย่างหนึ่ง: คำค้นหา หรือ พิกัด)
+  if (!searchQuery && (latitude === null || longitude === null)) {
+    return NextResponse.json({ error: 'พิกัดหรือคำค้นหาไม่ถูกต้อง' }, { status: 400 });
   }
 
-  const overpassQuery = `
-    [out:json][timeout:20];
-    (
-      nwr(around:${SEARCH_RADIUS_METERS},${latitude},${longitude})[amenity~"^(hospital|clinic)$"];
-      nwr(around:${SEARCH_RADIUS_METERS},${latitude},${longitude})[healthcare~"^(hospital|clinic|health_post|centre)$"];
-    );
-    out center;
-  `;
-  const overpassUrl = new URL('https://overpass-api.de/api/interpreter');
-  overpassUrl.searchParams.set('data', overpassQuery);
+  let mappedHospitals: Hospital[] = [];
+  const businessDates = getUpcomingBusinessDates();
 
   try {
-    const response = await fetch(overpassUrl, {
-      headers: {
-        Accept: 'application/json',
-        'User-Agent': 'PromChid/1.0 (OpenStreetMap Overpass client)',
-      },
-      cache: 'no-store',
-      signal: AbortSignal.timeout(25_000),
-    });
+    if (searchQuery) {
+      // โหมดที่ 1: ค้นหาจากข้อความ (พิมพ์ชื่อ)
+      const dbHospitals = await prisma.hospital.findMany({
+        where: {
+          name: {
+            contains: searchQuery,
+            mode: 'insensitive' // ค้นหาแบบไม่สนใจตัวพิมพ์เล็ก/ใหญ่ (สำหรับ PostgreSQL)
+          }
+        },
+        take: 20
+      });
 
-    if (!response.ok) {
-      return NextResponse.json(
-        { error: 'ไม่สามารถดึงข้อมูลจากแผนที่ OpenStreetMap ได้' },
-        { status: 502 }
-      );
-    }
+      mappedHospitals = dbHospitals.map(h => {
+        let distanceVal = 99999;
+        let distanceStr = '';
+        
+        // คำนวณระยะห่าง ถ้ามีพิกัดปัจจุบันส่งมาด้วย
+        if (latitude !== null && longitude !== null && h.latitude && h.longitude) {
+           distanceVal = getDistance(latitude, longitude, h.latitude, h.longitude);
+           distanceStr = formatDistance(distanceVal);
+        }
+        
+        return {
+          id: h.id,
+          name: h.name,
+          latitude: h.latitude ?? 0,
+          longitude: h.longitude ?? 0,
+          distanceVal: distanceVal,
+          distance: distanceStr,
+          availableDates: []
+        };
+      });
 
-    const data = (await response.json()) as { elements?: OverpassElement[] };
-    const seenElements = new Set<string>();
-    let unnamedHospitalCount = 0;
-    const mappedHospitals = (data.elements ?? []).flatMap((element) => {
-      const elementKey = `${element.type}-${element.id}`;
-      if (seenElements.has(elementKey)) return [];
-      seenElements.add(elementKey);
+    } else {
+      // โหมดที่ 2: ค้นหาจากพิกัด (GPS + OpenStreetMap)
+      const overpassQuery = `
+        [out:json][timeout:20];
+        (
+          nwr(around:${SEARCH_RADIUS_METERS},${latitude},${longitude})[amenity~"^(hospital|clinic)$"];
+          nwr(around:${SEARCH_RADIUS_METERS},${latitude},${longitude})[healthcare~"^(hospital|clinic|health_post|centre)$"];
+        );
+        out center;
+      `;
+      const overpassUrl = new URL('https://overpass-api.de/api/interpreter');
+      overpassUrl.searchParams.set('data', overpassQuery);
 
-      const hospitalLatitude = element.lat ?? element.center?.lat;
-      const hospitalLongitude = element.lon ?? element.center?.lon;
-      if (
-        typeof hospitalLatitude !== 'number' ||
-        typeof hospitalLongitude !== 'number' ||
-        !Number.isFinite(hospitalLatitude) ||
-        !Number.isFinite(hospitalLongitude)
-      ) {
-        return [];
+      const response = await fetch(overpassUrl, {
+        headers: {
+          Accept: 'application/json',
+          'User-Agent': 'PromChid/1.0 (OpenStreetMap Overpass client)',
+        },
+        cache: 'no-store',
+        signal: AbortSignal.timeout(25_000),
+      });
+
+      if (!response.ok) {
+        return NextResponse.json({ error: 'ไม่สามารถดึงข้อมูลจากแผนที่ได้' }, { status: 502 });
       }
 
-      const distanceVal = getDistance(
-        latitude,
-        longitude,
-        hospitalLatitude,
-        hospitalLongitude
-      );
+      const data = (await response.json()) as { elements?: OverpassElement[] };
+      const seenElements = new Set<string>();
+      let unnamedHospitalCount = 0;
+      
+      mappedHospitals = (data.elements ?? []).flatMap((element) => {
+        const elementKey = `${element.type}-${element.id}`;
+        if (seenElements.has(elementKey)) return [];
+        seenElements.add(elementKey);
 
-      return [{
-        id: `osm-${element.type}-${element.id}`,
-        name: element.tags?.name || `สถานพยาบาล (แห่งที่ ${++unnamedHospitalCount})`,
-        latitude: hospitalLatitude,
-        longitude: hospitalLongitude,
-        distanceVal,
-        distance: formatDistance(distanceVal),
-      }];
-    });
+        const hospitalLatitude = element.lat ?? element.center?.lat;
+        const hospitalLongitude = element.lon ?? element.center?.lon;
+        if (
+          typeof hospitalLatitude !== 'number' ||
+          typeof hospitalLongitude !== 'number' ||
+          !Number.isFinite(hospitalLatitude) ||
+          !Number.isFinite(hospitalLongitude)
+        ) {
+          return [];
+        }
+
+        const distanceVal = getDistance(
+          latitude!,
+          longitude!,
+          hospitalLatitude,
+          hospitalLongitude
+        );
+
+        return [{
+          id: `osm-${element.type}-${element.id}`,
+          name: element.tags?.name || `สถานพยาบาล (แห่งที่ ${++unnamedHospitalCount})`,
+          latitude: hospitalLatitude,
+          longitude: hospitalLongitude,
+          distanceVal,
+          distance: formatDistance(distanceVal),
+          availableDates: []
+        }];
+      });
+    }
 
     if (mappedHospitals.length === 0) {
       return NextResponse.json({ hospitals: [] });
     }
 
-    const businessDates = getUpcomingBusinessDates();
     const hospitalIds = mappedHospitals.map((hospital) => hospital.id);
 
+    // นำรายชื่อเข้า Database และสร้างรอบคิว (Slots) อัตโนมัติใน 3 วันข้างหน้า
     await prisma.$transaction(async (transaction) => {
       await transaction.hospital.createMany({
         data: mappedHospitals.map(({ id, name, latitude, longitude }) => ({
@@ -199,6 +239,7 @@ export async function GET(req: Request) {
       });
     });
 
+    // ดึงข้อมูลรอบคิวกลับมาส่งให้หน้าเว็บ
     const hospitalsWithSlots = await prisma.hospital.findMany({
       where: { id: { in: hospitalIds } },
       include: {
@@ -208,6 +249,7 @@ export async function GET(req: Request) {
         },
       },
     });
+
     const slotsByHospitalId = new Map(hospitalsWithSlots.map((hospital) => {
       const dateGroups = new Map<string, { date: string; dateString: string; slots: string[]; fullSlots: string[] }>();
       hospital.slots.filter((slot) => !slot.isClosed).forEach((slot) => {
@@ -229,12 +271,17 @@ export async function GET(req: Request) {
       ...hospital,
       availableDates: slotsByHospitalId.get(hospital.id) ?? [],
     }));
+    
+    // เรียงลำดับตามระยะทางที่ใกล้ที่สุด
     hospitals.sort((a, b) => a.distanceVal - b.distanceVal);
+    
     return NextResponse.json({ hospitals });
-  } catch {
+
+  } catch (error) {
+    console.error(error);
     return NextResponse.json(
-      { error: 'เกิดข้อผิดพลาดในการดึงข้อมูลแผนที่' },
-      { status: 502 }
+      { error: 'เกิดข้อผิดพลาดในการดึงข้อมูลสถานพยาบาล' },
+      { status: 500 }
     );
   }
 }

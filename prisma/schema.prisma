@@ -20,11 +20,13 @@ model User {
   username       String
   passwordHash   String
   role           Role            @default(USER)
+  notificationEmail String?         // <--- เพิ่มบรรทัดนี้: เก็บอีเมลสำหรับแจ้งเตือนโดยเฉพาะ
   createdAt      DateTime        @default(now())
   profile        Profile?
   children       Child[]
   appointments   Appointment[]
   vaccineRecords VaccineRecord[]
+  vaccineRequests VaccineRequest[]
 }
 
 model Profile {
@@ -92,24 +94,23 @@ model HospitalSlot {
 }
 
 model Appointment {
-  id      String @id @default(uuid())
-  userId  String
-  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  childId String
-  child   Child  @relation(fields: [childId], references: [id], onDelete: Restrict)
-
-  // เชื่อมความสัมพันธ์กับตาราง Hospital ของจริง
-  hospitalId String?
-  hospital   Hospital? @relation(fields: [hospitalId], references: [id])
-
-  hospitalName  String // (คงฟิลด์เดิมไว้ เพื่อไม่ให้ข้อมูลเก่าที่เคยจองไว้พัง)
+  id            String    @id @default(uuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  childId       String
+  child         Child     @relation(fields: [childId], references: [id], onDelete: Restrict)
+  hospitalId    String?
+  hospital      Hospital? @relation(fields: [hospitalId], references: [id])
+  hospitalName  String
   scheduledAt   DateTime
-  notified1Day  Boolean  @default(false)
+  requestedVaccine String?   // <--- เพิ่มบรรทัดนี้ (เพื่อเก็บชื่อวัคซีนที่ผู้ใช้เลือก)
+  notified3Days Boolean   @default(false)
+  notified1Day  Boolean   @default(false)
   notified1Hour Boolean  @default(false)
-  status        String   @default("PENDING")
-  isWaitlisted  Boolean  @default(false)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  status        String    @default("PENDING") // PENDING, CONFIRMED, COMPLETED, CANCELLED, EXPIRED, RESCHEDULED
+  isWaitlisted  Boolean   @default(false)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 }
 
 model VaccineRecord {
@@ -140,4 +141,15 @@ model VaccineCatalog {
   updatedAt DateTime        @updatedAt
 
   @@index([isActive, name])
+}
+// 1. นำโค้ดนี้ไปต่อท้ายสุดของไฟล์ prisma/schema.prisma
+model VaccineRequest {
+  id            String   @id @default(uuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  requestedName String
+  status        String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  adminNote     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
