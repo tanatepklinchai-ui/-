@@ -204,9 +204,9 @@ export async function PATCH(req: Request) {
       const currentAppointment = await transaction.appointment.findFirst({
         where: { id: appointmentId, userId: session.userId },
       });
-      if (!currentAppointment || !['PENDING', 'CONFIRMED'].includes(currentAppointment.status)) {
-        throw new AppointmentRequestError('ไม่พบนัดหมายหรือไม่สามารถแก้ไขนัดหมายนี้ได้', 404);
-      }
+      if (!currentAppointment || !['PENDING', 'CONFIRMED', 'EXPIRED', 'RESCHEDULED'].includes(currentAppointment.status)) {
+  throw new AppointmentRequestError('ไม่พบนัดหมายหรือไม่สามารถแก้ไขนัดหมายนี้ได้', 404);
+}
 
       if (status === 'CANCELLED') {
         if (currentAppointment.hospitalId && !currentAppointment.isWaitlisted) {
