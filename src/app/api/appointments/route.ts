@@ -1,4 +1,3 @@
-// src/app/api/appointments/route.ts
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth';
@@ -204,9 +203,11 @@ export async function PATCH(req: Request) {
       const currentAppointment = await transaction.appointment.findFirst({
         where: { id: appointmentId, userId: session.userId },
       });
+      
+      // ปลดล็อกให้สามารถแก้ไข/ลบ รายการที่ EXPIRED และ RESCHEDULED ได้
       if (!currentAppointment || !['PENDING', 'CONFIRMED', 'EXPIRED', 'RESCHEDULED'].includes(currentAppointment.status)) {
-  throw new AppointmentRequestError('ไม่พบนัดหมายหรือไม่สามารถแก้ไขนัดหมายนี้ได้', 404);
-}
+        throw new AppointmentRequestError('ไม่พบนัดหมายหรือไม่สามารถแก้ไขนัดหมายนี้ได้', 404);
+      }
 
       if (status === 'CANCELLED') {
         if (currentAppointment.hospitalId && !currentAppointment.isWaitlisted) {
@@ -273,8 +274,10 @@ export async function PATCH(req: Request) {
           include: appointmentInclude(),
         });
       }
+      
       let newStatus = 'CONFIRMED';
       let newIsWaitlisted = false;
+      
       if (!isSameSlot) {
         const reservation = await transaction.hospitalSlot.updateMany({
           where: { id: targetSlot.id, isClosed: false, booked: { lt: targetSlot.capacity } },
@@ -288,11 +291,9 @@ export async function PATCH(req: Request) {
           where: { hospitalId: currentAppointment.hospitalId, date: currentSlot.date, time: currentSlot.time, booked: { gt: 0 } },
           data: { booked: { decrement: 1 } },
         });
-        let newStatus = 'CONFIRMED';
-      let newIsWaitlisted = false;
-      if (!isSameSlot) {
       }
 
+      // เปลี่ยนสถานะกลับเป็น CONFIRMED เมื่อเลื่อนนัดสำเร็จ
       return transaction.appointment.update({
         where: { id: appointmentId },
         data: { 
@@ -303,8 +304,6 @@ export async function PATCH(req: Request) {
         include: appointmentInclude(),
       });
     });
-
-    return NextResponse.json({ success: true, appointment });
 
     return NextResponse.json({ success: true, appointment });
   } catch (error) {
