@@ -15,8 +15,11 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "พร้อมฉีด (PromChid) - ระบบบริหารและนัดหมายวัคซีน",
   description: "ระบบบันทึก ตารางนัดหมาย และแจ้งเตือนการรับวัคซีนสำหรับเด็ก",
+  // 👉 เพิ่มบรรทัด verification ตรงนี้
+  verification: {
+    google: "DA03QkBA3A2V76dR_KEcIz3vQFpD3LNHvPoDVT1QFHg",
+  },
 };
-
 export default function RootLayout({
   children,
 }: {
