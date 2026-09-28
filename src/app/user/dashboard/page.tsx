@@ -145,7 +145,8 @@ export default function ColorfulDashboard() {
   const notify = (type: ToastMessage['type'], title: string, description?: string) => {
     setToast({ type, title, description });
   };
-useEffect(() => {
+  
+  useEffect(() => {
     fetch('/api/user/settings')
       .then(res => res.json())
       .then(data => { if (data.email) setNotificationEmail(data.email); })
@@ -169,6 +170,7 @@ useEffect(() => {
       setIsSavingEmail(false);
     }
   };
+  
   // ดึงรายการวัคซีนทางเลือก
   useEffect(() => {
     fetch('/api/vaccines/custom')
@@ -456,8 +458,8 @@ useEffect(() => {
       setIsSavingVaccineRecord(false);
     }
   };
-
-  const handleFindNearby = () => {
+    
+   const handleFindNearby = () => {
     setIsLocating(true);
     setHospitalSearchQuery(''); // เคลียร์ช่องค้นหาถ้าใช้ GPS
     if (!navigator.geolocation) {
@@ -465,6 +467,10 @@ useEffect(() => {
       setIsLocating(false);
       return;
     }
+
+    // 👉 1. แจ้งเตือนผู้ใช้ก่อนว่าระบบกำลังจะขอสิทธิ์ GPS
+    notify('info', '📍 กำลังระบุตำแหน่งของคุณ', 'กรุณากด "อนุญาต (Allow)" ให้เว็บเข้าถึงตำแหน่ง');
+
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         try {
@@ -472,9 +478,19 @@ useEffect(() => {
           const res = await fetch(`/api/hospitals?lat=${latitude}&lng=${longitude}`);
           const data = await res.json();
           if (!res.ok) throw new Error(data.error || 'ค้นหาสถานพยาบาลไม่สำเร็จ');
-          setRealHospitals(data.hospitals ?? []);
+          
+          const hospitals = data.hospitals ?? [];
+          setRealHospitals(hospitals);
           setSelectedHospital(null);
           setSelectedDateSlot(null);
+
+          // 👉 2. แจ้งเตือนเมื่อดึงข้อมูลเสร็จแล้ว
+          if (hospitals.length > 0) {
+            notify('success', 'ค้นพบสถานพยาบาลแล้ว', `แสดงผล ${hospitals.length} แห่งในบริเวณใกล้เคียง`);
+          } else {
+            notify('warning', 'ไม่มีสถานพยาบาลใกล้เคียง', 'ไม่พบสถานพยาบาลที่เปิดรับจองในรัศมีของคุณขณะนี้');
+          }
+
         } catch (error) {
           notify('error', 'ค้นหาสถานพยาบาลไม่สำเร็จ', error instanceof Error ? error.message : 'กรุณาลองใหม่อีกครั้ง');
         } finally {
@@ -483,17 +499,16 @@ useEffect(() => {
       },
       (error) => {
         const description = error.code === error.PERMISSION_DENIED
-          ? 'อนุญาตการเข้าถึงตำแหน่งจากการตั้งค่าเบราว์เซอร์ก่อนค้นหา'
+          ? 'คุณไม่ได้อนุญาตการเข้าถึงตำแหน่ง กรุณาเปิดสิทธิ์ในการตั้งค่าเบราว์เซอร์'
           : error.code === error.TIMEOUT
             ? 'การค้นหาตำแหน่งใช้เวลานานเกินไป กรุณาลองอีกครั้ง'
             : 'ตรวจสอบการตั้งค่าตำแหน่งของอุปกรณ์แล้วลองใหม่';
         notify('error', 'ระบุตำแหน่งไม่ได้', description);
         setIsLocating(false);
       },
-      { enableHighAccuracy: true }
+      { enableHighAccuracy: true, timeout: 10000 } // 👉 3. เพิ่ม timeout ป้องกันการค้างถ้าระบบหา GPS ไม่เจอ
     );
   };
-
   const handleBooking = async () => {
     if (!selectedChildId) {
       setAppointmentError('กรุณาเลือกเด็กก่อนจองนัดหมาย');
@@ -501,6 +516,11 @@ useEffect(() => {
     }
     if (!selectedHospital || !selectedDateSlot) {
       notify('info', 'เลือกสถานพยาบาลและรอบเวลาก่อน', 'เลือกสถานพยาบาลใกล้คุณ แล้วแตะเวลาที่ต้องการจอง');
+      return;
+    }
+
+    if (!vaccineToBook) {
+      notify('info', 'กรุณาเลือกวัคซีนที่ต้องการ', 'โปรดระบุวัคซีนที่จะรับบริการในรอบนี้');
       return;
     }
 
@@ -514,7 +534,12 @@ useEffect(() => {
       const response = await fetch('/api/appointments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ childId: selectedChildId, hospitalId: hospital.id, scheduledAt: scheduledAt.toISOString(),requestedVaccine: vaccineToBook ? `${vaccineToBook.name} (${vaccineToBook.age})` : null }),
+        body: JSON.stringify({ 
+          childId: selectedChildId, 
+          hospitalId: hospital.id, 
+          scheduledAt: scheduledAt.toISOString(),
+          requestedVaccine: vaccineToBook ? `${vaccineToBook.name} (${vaccineToBook.age})` : null 
+        }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'ไม่สามารถบันทึกนัดหมายได้');
@@ -1087,12 +1112,36 @@ useEffect(() => {
               <section className="bg-white rounded-3xl p-6 md:p-8 shadow-xl shadow-rose-100/50 border-t-4 border-rose-400">
                 <div className="mb-6">
                   <h2 className="text-2xl font-extrabold text-rose-900">📅 นัดหมายรับวัคซีน</h2>
-                  <p className="text-sm text-slate-500 mt-1">ค้นหาสถานพยาบาลใกล้ฉัน หรือพิมพ์ชื่อโรงพยาบาลที่ต้องการจองคิว</p>
-                  {vaccineToBook && (
-                    <p className="mt-3 inline-flex rounded-full bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 border border-amber-200 shadow-sm">
-                      <span className="mr-1">🎯</span> กำลังจองสำหรับ: {vaccineToBook.name} ({vaccineToBook.age})
-                    </p>
-                  )}
+                  <p className="text-sm text-slate-500 mt-1">ค้นหาสถานพยาบาลใกล้ฉัน เลือกรอบเวลา และระบุวัคซีนที่ต้องการ</p>
+
+                  {/* กล่อง Dropdown ที่เชื่อมกับข้อมูลตารางวัคซีน */}
+                  <label className="mt-5 block text-sm font-bold text-slate-700">
+                    วัคซีนที่ต้องการรับบริการ <span className="text-rose-500">*</span>
+                    <select
+                      required
+                      value={vaccineToBook ? `${vaccineToBook.name}|${vaccineToBook.age}` : ""}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val) {
+                          const [name, age] = val.split('|');
+                          setVaccineToBook({ name, age });
+                        } else {
+                          setVaccineToBook(null);
+                        }
+                      }}
+                      className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-100 bg-slate-50 transition-all"
+                    >
+                      <option value="">-- กรุณาเลือกวัคซีน --</option>
+                      
+                      {/* ดึงรายการวัคซีนที่ "ยังไม่ได้ฉีด" จากตารางมาเป็นตัวเลือกอัตโนมัติ */}
+                      {vaccineRows.filter(v => v.record?.verificationStatus !== 'VERIFIED').map((v, idx) => (
+                        <option key={idx} value={`${v.vaccine.name} (${v.vaccine.dose})|${v.vaccine.ageCriteria}`}>
+                          {v.vaccine.name} ({v.vaccine.dose}) - สำหรับอายุ {v.vaccine.ageCriteria}
+                        </option>
+                      ))}
+                      <option value="วัคซีนทางเลือก / อื่นๆ|ปรึกษาแพทย์">วัคซีนทางเลือก / อื่นๆ (ปรึกษาแพทย์)</option>
+                    </select>
+                  </label>
                 </div>
 
                 <div className="flex flex-col sm:flex-row gap-3 mb-8">

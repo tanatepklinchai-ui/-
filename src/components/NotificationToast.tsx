@@ -3,72 +3,80 @@
 import { useEffect } from 'react';
 
 export type ToastMessage = {
-  type: 'success' | 'error' | 'info';
+  type: 'success' | 'error' | 'info' | 'warning';
   title: string;
   description?: string;
 };
 
-type Props = {
-  message: ToastMessage | null;
-  onDismiss: () => void;
-};
-
-const styles = {
-  success: {
-    icon: '✓',
-    iconStyle: 'bg-emerald-100 text-emerald-700',
-    borderStyle: 'border-emerald-200',
-    label: 'สำเร็จ',
-  },
-  error: {
-    icon: '!',
-    iconStyle: 'bg-rose-100 text-rose-700',
-    borderStyle: 'border-rose-200',
-    label: 'ไม่สำเร็จ',
-  },
-  info: {
-    icon: 'i',
-    iconStyle: 'bg-sky-100 text-sky-700',
-    borderStyle: 'border-sky-200',
-    label: 'แจ้งให้ทราบ',
-  },
-};
-
-export default function NotificationToast({ message, onDismiss }: Props) {
+export default function NotificationToast({ 
+  message, 
+  onDismiss 
+}: { 
+  message: ToastMessage | null, 
+  onDismiss: () => void 
+}) {
+  // สั่งให้ป๊อปอัปหายไปเองหลังจาก 4 วินาที
   useEffect(() => {
-    if (!message) return;
-    const timer = window.setTimeout(onDismiss, 5000);
-    return () => window.clearTimeout(timer);
+    if (message) {
+      const timer = setTimeout(() => {
+        onDismiss();
+      }, 4000); 
+      return () => clearTimeout(timer);
+    }
   }, [message, onDismiss]);
 
   if (!message) return null;
-  const style = styles[message.type];
+
+  // ตั้งค่าธีมสีและไอคอนตามสถานะ
+  const styles = {
+    success: 'bg-emerald-50 border-emerald-200 text-emerald-800 shadow-emerald-100',
+    error: 'bg-rose-50 border-rose-200 text-rose-800 shadow-rose-100',
+    info: 'bg-sky-50 border-sky-200 text-sky-800 shadow-sky-100',
+    warning: 'bg-amber-50 border-amber-200 text-amber-800 shadow-amber-100',
+  };
+
+  const icons = {
+    success: '✅',
+    error: '❌',
+    info: 'ℹ️',
+    warning: '⚠️',
+  };
 
   return (
-    <div className="pointer-events-none fixed inset-x-0 top-4 z-[70] flex justify-center px-4 sm:justify-end sm:px-6">
-      <section
-        role={message.type === 'error' ? 'alert' : 'status'}
-        aria-live={message.type === 'error' ? 'assertive' : 'polite'}
-        className={`pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-2xl border ${style.borderStyle} bg-white p-4 shadow-xl shadow-slate-900/10 animate-[toast-in_180ms_ease-out]`}
-      >
-        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-base font-extrabold ${style.iconStyle}`} aria-hidden="true">
-          {style.icon}
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-[10px] font-extrabold uppercase text-slate-400">{style.label}</p>
-          <h2 className="mt-0.5 text-sm font-bold text-slate-900">{message.title}</h2>
-          {message.description && <p className="mt-1 text-xs leading-relaxed text-slate-600">{message.description}</p>}
+    <>
+      <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] w-full max-w-sm px-4 animate-toast-slide">
+        <div className={`flex items-start gap-3 p-4 rounded-2xl border shadow-xl ${styles[message.type]}`}>
+          <span className="text-2xl shrink-0 mt-0.5" aria-hidden="true">
+            {icons[message.type]}
+          </span>
+          <div className="flex-1 min-w-0">
+            <h4 className="font-extrabold text-sm truncate">{message.title}</h4>
+            {message.description && (
+              <p className="text-xs mt-1 opacity-90 leading-relaxed line-clamp-2">
+                {message.description}
+              </p>
+            )}
+          </div>
+          <button 
+            onClick={onDismiss} 
+            className="text-current opacity-40 hover:opacity-100 hover:bg-black/5 transition-all p-1.5 rounded-full"
+            aria-label="ปิดการแจ้งเตือน"
+          >
+            ✕
+          </button>
         </div>
-        <button type="button" onClick={onDismiss} aria-label="ปิดข้อความแจ้งเตือน" className="-mr-1 -mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700">
-          ×
-        </button>
-      </section>
-      <style jsx>{`
-        @keyframes toast-in {
-          from { opacity: 0; transform: translateY(-8px) scale(0.98); }
-          to { opacity: 1; transform: translateY(0) scale(1); }
+      </div>
+
+      {/* แอนิเมชันสไลด์ลงมาอย่างนุ่มนวล */}
+      <style dangerouslySetInnerHTML={{__html: `
+        @keyframes toastSlideDown {
+          0% { opacity: 0; transform: translate(-50%, -20px) scale(0.95); }
+          100% { opacity: 1; transform: translate(-50%, 0) scale(1); }
         }
-      `}</style>
-    </div>
+        .animate-toast-slide {
+          animation: toastSlideDown 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+      `}} />
+    </>
   );
 }
