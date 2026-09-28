@@ -273,7 +273,8 @@ export async function PATCH(req: Request) {
           include: appointmentInclude(),
         });
       }
-
+      let newStatus = 'CONFIRMED';
+      let newIsWaitlisted = false;
       if (!isSameSlot) {
         const reservation = await transaction.hospitalSlot.updateMany({
           where: { id: targetSlot.id, isClosed: false, booked: { lt: targetSlot.capacity } },
@@ -287,14 +288,23 @@ export async function PATCH(req: Request) {
           where: { hospitalId: currentAppointment.hospitalId, date: currentSlot.date, time: currentSlot.time, booked: { gt: 0 } },
           data: { booked: { decrement: 1 } },
         });
+        let newStatus = 'CONFIRMED';
+      let newIsWaitlisted = false;
+      if (!isSameSlot) {
       }
 
       return transaction.appointment.update({
         where: { id: appointmentId },
-        data: { scheduledAt: appointmentDate },
+        data: { 
+          scheduledAt: appointmentDate, 
+          status: newStatus,
+          isWaitlisted: newIsWaitlisted 
+        },
         include: appointmentInclude(),
       });
     });
+
+    return NextResponse.json({ success: true, appointment });
 
     return NextResponse.json({ success: true, appointment });
   } catch (error) {
