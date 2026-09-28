@@ -1293,26 +1293,36 @@ export default function ColorfulDashboard() {
                 ) : (
                   <div className="space-y-4">
                     {visibleAppointments.map((appointment) => {
-                      const canManage = ['PENDING', 'CONFIRMED'].includes(appointment.status);
+                      const canManage = ['PENDING', 'CONFIRMED','RESCHEDULED', 'EXPIRED'].includes(appointment.status);
                       const currentSlotKey = getBangkokSlotKey(appointment.scheduledAt);
                       const editableSlots = appointment.hospital?.slots.filter((slot) =>
                         slot.booked < slot.capacity ||
                         `${new Date(slot.date).toISOString().slice(0, 10)}|${slot.time}` === currentSlotKey
                       ) ?? [];
                       const statusLabel = appointment.status === 'PENDING'
-                        ? appointment.isWaitlisted ? 'คิวเต็ม • รออนุมัติ' : 'รอยืนยัน'
-                        : appointment.status === 'CANCELLED'
-                          ? 'ยกเลิกแล้ว'
-                          : appointment.status === 'COMPLETED'
-                            ? 'เสร็จสิ้น'
-                            : appointment.status;
-
+  ? appointment.isWaitlisted ? 'รอคิว' : 'รอการยืนยัน'
+  : appointment.status === 'CANCELLED'
+    ? 'ยกเลิกแล้ว'
+    : appointment.status === 'COMPLETED'
+      ? 'ฉีดวัคซีนแล้ว'
+      : appointment.status === 'EXPIRED'
+        ? 'หมดอายุ/เลยกำหนด'
+        : appointment.status === 'RESCHEDULED'
+          ? 'ถูกเลื่อนนัด'
+          : appointment.status;
                       return (
                         <article key={appointment.id} className="p-4 rounded-2xl border-2 border-indigo-50 bg-indigo-50/20">
                           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                             <div>
-                              <span className={`text-xs font-bold px-3 py-1 rounded-full ${appointment.status === 'PENDING' ? 'bg-amber-100 text-amber-700' : appointment.status === 'CONFIRMED' ? 'bg-sky-100 text-sky-700' : appointment.status === 'CANCELLED' ? 'bg-slate-100 text-slate-600' : 'bg-emerald-100 text-emerald-700'}`}>
-                                {statusLabel}
+                              <span className={`text-xs font-bold px-3 py-1 rounded-full ${
+  appointment.status === 'PENDING' ? 'bg-amber-100 text-amber-700' :
+  appointment.status === 'CONFIRMED' ? 'bg-sky-100 text-sky-700' :
+  appointment.status === 'CANCELLED' ? 'bg-slate-100 text-slate-600' :
+  appointment.status === 'EXPIRED' ? 'bg-rose-100 text-rose-700' :
+  appointment.status === 'RESCHEDULED' ? 'bg-orange-100 text-orange-700' :
+  'bg-emerald-100 text-emerald-700'
+}`}>
+  {statusLabel}
                               </span>
                               <h4 className="font-bold text-slate-800 text-base mt-2">{appointment.hospitalName}</h4>
                               <p className="text-xs text-slate-500 mt-1">
@@ -1321,23 +1331,25 @@ export default function ColorfulDashboard() {
                             </div>
                             {canManage && editingAppointmentId !== appointment.id && (
                               <div className="flex items-center gap-2 w-full sm:w-auto">
-                                <button
-                                  onClick={() => {
-                                    setEditingAppointmentId(appointment.id);
-                                    setEditSlotKey(currentSlotKey);
-                                    setAppointmentError('');
-                                  }}
-                                  className="flex-1 sm:flex-none px-3.5 py-2 bg-amber-50 text-amber-700 hover:bg-amber-100 text-xs font-bold rounded-xl transition-all"
-                                >
-                                  ✏️ เปลี่ยนเวลา
-                                </button>
-                                <button
-                                  onClick={() => setCancellationTarget(appointment)}
-                                  className="flex-1 sm:flex-none px-3.5 py-2 bg-rose-50 text-rose-600 hover:bg-rose-100 text-xs font-bold rounded-xl transition-all"
-                                >
-                                  ยกเลิกคิว
-                                </button>
-                              </div>
+  {appointment.status !== 'EXPIRED' && (
+    <button
+      onClick={() => {
+        setEditingAppointmentId(appointment.id);
+        setEditSlotKey(currentSlotKey);
+        setAppointmentError('');
+      }}
+      className="flex-1 sm:flex-none px-3.5 py-2 bg-amber-50 text-amber-700 hover:bg-amber-100 text-xs font-bold rounded-xl transition-all"
+    >
+      {appointment.status === 'RESCHEDULED' ? 'เลือกวันนัดใหม่' : 'เลื่อนนัด'}
+    </button>
+  )}
+  <button
+    onClick={() => setCancellationTarget(appointment)}
+    className="flex-1 sm:flex-none px-3.5 py-2 bg-rose-50 text-rose-600 hover:bg-rose-100 text-xs font-bold rounded-xl transition-all"
+  >
+    {appointment.status === 'EXPIRED' ? 'ลบรายการ' : 'ยกเลิกนัด'}
+  </button>
+</div>
                             )}
                           </div>
                           {editingAppointmentId === appointment.id && canManage && (
