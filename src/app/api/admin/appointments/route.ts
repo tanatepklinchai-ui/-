@@ -2,11 +2,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth';
-import { Resend } from 'resend';
-
-export const dynamic = 'force-dynamic';
-
-const resend = new Resend(process.env.RESEND_API_KEY);
+import { sendEmail } from '@/lib/mailer'; // 👈 1. เปลี่ยนมานำเข้า sendEmail ของเรา
 
 class RequestError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
@@ -102,7 +98,6 @@ export async function PATCH(req: Request) {
       });
       if (statusUpdate.count !== 1) throw new RequestError('คิวมีการเปลี่ยนแปลง กรุณาโหลดใหม่', 409);
 
-      // คืนที่นั่งในรอบเวลาเดิม หากโดนยกเลิก ไม่มาตามนัด หรือโดนเลื่อนคิว
       if (['CANCELLED', 'NO_SHOW', 'RESCHEDULED'].includes(status) && current.hospitalId && !current.isWaitlisted) {
         const slotKey = getBangkokSlot(current.scheduledAt);
         await transaction.hospitalSlot.updateMany({
@@ -117,14 +112,13 @@ export async function PATCH(req: Request) {
       });
     });
 
-    // ส่งอีเมลเมื่อเลื่อนนัดสำเร็จ
+    // 👉 2. เปลี่ยนมาส่งอีเมลเลื่อนนัดผ่านฟังก์ชัน sendEmail
     if (status === 'RESCHEDULED' && appointment?.user) {
       const targetEmail = appointment.user.notificationEmail || appointment.user.email;
       if (targetEmail) {
         const formattedDate = new Date(appointment.scheduledAt).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' });
         try {
-          await resend.emails.send({
-            from: 'PromChid <onboarding@resend.dev>',
+          await sendEmail({
             to: targetEmail,
             subject: '🗓️ แจ้งเลื่อนนัดหมายฉีดวัคซีน - พร้อมฉีด',
             html: `

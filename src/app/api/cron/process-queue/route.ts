@@ -1,15 +1,11 @@
 // src/app/api/cron/process-queue/route.ts
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { Resend } from 'resend';
+import { sendEmail } from '@/lib/mailer'; // 👈 1. เปลี่ยนมานำเข้า sendEmail ของเรา
 
 export const dynamic = 'force-dynamic';
-const resend = new Resend(process.env.RESEND_API_KEY);
 
-// 1. เพิ่มพารามิเตอร์ req: Request เพื่อให้อ่านค่า Headers ได้
 export async function GET(req: Request) {
-  
-  // 2. เพิ่มระบบป้องกัน: ตรวจสอบว่าเป็น Vercel Cron ที่ส่งกุญแจมาถูกต้องหรือไม่
   const authHeader = req.headers.get('authorization');
   if (process.env.NODE_ENV === 'production' && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -34,8 +30,8 @@ export async function GET(req: Request) {
       const targetEmail = appt.user.notificationEmail || appt.user.email;
       if (targetEmail) {
         try {
-          await resend.emails.send({
-            from: 'PromChid <onboarding@resend.dev>',
+          // 👉 2. เปลี่ยนมาใช้ sendEmail แทน resend.emails.send
+          await sendEmail({
             to: targetEmail,
             subject: '🔔 แจ้งเตือน: อีก 3 วันคุณมีนัดฉีดวัคซีน - พร้อมฉีด',
             html: `<div style="font-family: sans-serif; padding: 20px;">
@@ -76,8 +72,8 @@ export async function GET(req: Request) {
       const targetEmail = appt.user.notificationEmail || appt.user.email;
       if (targetEmail) {
         try {
-          await resend.emails.send({
-            from: 'PromChid <onboarding@resend.dev>',
+          // 👉 3. เปลี่ยนมาใช้ sendEmail สำหรับแจ้งเตือน 1 วัน
+          await sendEmail({
             to: targetEmail,
             subject: '⏰ พรุ่งนี้คุณมีนัดฉีดวัคซีน - พร้อมฉีด',
             html: `<div style="font-family: sans-serif; padding: 20px;">
@@ -102,7 +98,7 @@ export async function GET(req: Request) {
       }
     }
 
-    // 3. เคลียร์คิวที่เลยกำหนดเกิน 1 ชั่วโมง (คงเดิม)
+    // 3. เคลียร์คิวที่เลยกำหนดเกิน 1 ชั่วโมง
     const expiredThreshold = new Date(now.getTime() - 60 * 60 * 1000);
     const expiredAppointments = await prisma.appointment.findMany({
       where: { status: { in: ['PENDING', 'CONFIRMED'] }, scheduledAt: { lt: expiredThreshold } },
