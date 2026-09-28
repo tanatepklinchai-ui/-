@@ -675,33 +675,6 @@ useEffect(() => {
           {/* TAB 1: OVERVIEW */}
           {activeTab === 'overview' && (
             <div className="space-y-6 animate-fade-in">
-              {/* ตั้งค่าอีเมลแจ้งเตือน */}
-              <section className="bg-white rounded-3xl p-6 md:p-8 shadow-xl shadow-amber-100/50 border border-amber-50 mt-6">
-                <div className="flex items-center gap-3 mb-5">
-                  <div className="w-12 h-12 bg-amber-100 rounded-2xl flex items-center justify-center text-2xl shadow-sm">🔔</div>
-                  <div>
-                    <h2 className="text-lg font-extrabold text-slate-800">ตั้งค่าการรับอีเมลแจ้งเตือน</h2>
-                    <p className="text-xs text-slate-500 mt-1">ระบบจะส่งอีเมลแจ้งเตือนล่วงหน้า 3 วัน และ 1 วัน ก่อนถึงวันนัดหมาย</p>
-                  </div>
-                </div>
-                <form onSubmit={handleSaveEmail} className="flex flex-col sm:flex-row gap-3">
-                  <input 
-                    type="email" 
-                    required 
-                    value={notificationEmail} 
-                    onChange={(e) => setNotificationEmail(e.target.value)} 
-                    placeholder="กรอกอีเมลของคุณที่นี่..." 
-                    className="flex-1 rounded-xl border border-slate-200 px-4 py-3 text-sm focus:border-amber-400 focus:ring-2 focus:ring-amber-100 outline-none transition-all"
-                  />
-                  <button 
-                    type="submit" 
-                    disabled={isSavingEmail} 
-                    className="shrink-0 rounded-xl bg-amber-500 px-6 py-3 text-sm font-bold text-white hover:bg-amber-600 shadow-md shadow-amber-200 disabled:opacity-60 transition"
-                  >
-                    {isSavingEmail ? 'กำลังบันทึก...' : 'บันทึกอีเมล'}
-                  </button>
-                </form>
-              </section>
               <section className="bg-white rounded-3xl p-6 md:p-8 shadow-xl shadow-blue-100/50 border border-white">
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
                   <div className="flex items-center gap-4">
