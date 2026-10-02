@@ -167,6 +167,7 @@ export async function PATCH(req: Request) {
             notified7Days: false,
             notified3Days: false,
             notified1Day: false,
+            notified1Hour: false,
           },
         });
         if (updated.count !== 1) throw new RequestError('คิวมีการเปลี่ยนแปลง กรุณาโหลดใหม่', 409);

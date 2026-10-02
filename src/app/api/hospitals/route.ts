@@ -27,6 +27,8 @@ type Hospital = {
   availableDates: { date: string; dateString: string; slots: string[]; fullSlots: string[] }[];
 };
 
+type AvailableDate = Hospital['availableDates'][number];
+
 function getBangkokToday() {
   const dateParts = new Intl.DateTimeFormat('en', {
     timeZone: 'Asia/Bangkok',
@@ -125,7 +127,7 @@ export async function GET(req: Request) {
           longitude: h.longitude ?? 0,
           distanceVal: distanceVal,
           distance: distanceStr,
-          availableDates: []
+          availableDates: [],
         };
       });
 
@@ -222,25 +224,28 @@ export async function GET(req: Request) {
       },
     });
 
-    const slotsByHospitalId = new Map(hospitalsWithSlots.map((hospital) => {
-      const dateGroups = new Map<string, { date: string; dateString: string; slots: string[]; fullSlots: string[] }>();
-      hospital.slots.filter((slot) => {
-        const scheduledAt = new Date(`${slot.date.toISOString().slice(0, 10)}T${slot.time}:00+07:00`);
-        return !slot.isClosed && scheduledAt > new Date();
-      }).forEach((slot) => {
-        const dateString = slot.date.toISOString().slice(0, 10);
-        const group = dateGroups.get(dateString) ?? {
-          date: formatSlotDate(slot.date),
-          dateString,
-          slots: [],
-          fullSlots: [],
-        };
-        if (slot.booked < slot.capacity) group.slots.push(slot.time);
-        else group.fullSlots.push(slot.time);
-        dateGroups.set(dateString, group);
-      });
-      return [hospital.id, Array.from(dateGroups.values())];
-    }));
+    const now = new Date();
+    const slotsByHospitalId = new Map<string, AvailableDate[]>(
+      hospitalsWithSlots.map((hospital) => {
+        const dateGroups = new Map<string, AvailableDate>();
+        hospital.slots.filter((slot) => {
+          const scheduledAt = new Date(`${slot.date.toISOString().slice(0, 10)}T${slot.time}:00+07:00`);
+          return !slot.isClosed && scheduledAt > now;
+        }).forEach((slot) => {
+          const dateString = slot.date.toISOString().slice(0, 10);
+          const group = dateGroups.get(dateString) ?? {
+            date: formatSlotDate(slot.date),
+            dateString,
+            slots: [],
+            fullSlots: [],
+          };
+          if (slot.booked < slot.capacity) group.slots.push(slot.time);
+          else group.fullSlots.push(slot.time);
+          dateGroups.set(dateString, group);
+        });
+        return [hospital.id, Array.from(dateGroups.values())];
+      })
+    );
 
     const hospitals: Hospital[] = mappedHospitals.map((hospital) => ({
       ...hospital,

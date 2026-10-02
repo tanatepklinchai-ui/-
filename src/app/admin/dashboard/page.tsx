@@ -215,7 +215,7 @@ export default function AdminDashboardPage() {
   }
 
   async function deleteHospital(hospital: Hospital) {
-    if (!window.confirm(`ยืนยันลบชื่อสถานพยาบาล “${hospital.name}” และรอบเวลาทั้งหมดหรือไม่?`)) return;
+    if (!window.confirm(`ยืนยันลบสถานพยาบาล “${hospital.name}” และรอบเวลาทั้งหมดหรือไม่? นัดหมายเดิมจะยังคงอยู่ในประวัติ แต่จะไม่ผูกกับสถานพยาบาลนี้`)) return;
     await performAction(`hospital-${hospital.id}`, async () => {
       const response = await fetch('/api/admin/slots', {
         method: 'DELETE', headers: { 'Content-Type': 'application/json' },

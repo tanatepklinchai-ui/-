@@ -46,27 +46,30 @@ export async function GET() {
 export async function DELETE(req: Request) {
   if (!(await isAdmin())) return NextResponse.json({ error: 'ไม่มีสิทธิ์ดำเนินการนี้' }, { status: 403 });
   try {
-    const { hospitalId } = await req.json();
-    if (typeof hospitalId !== 'string') {
+    const body: unknown = await req.json();
+    const hospitalId = typeof body === 'object' && body !== null && 'hospitalId' in body
+      ? body.hospitalId
+      : null;
+    if (typeof hospitalId !== 'string' || !hospitalId) {
       return NextResponse.json({ error: 'ข้อมูลสถานพยาบาลไม่ถูกต้อง' }, { status: 400 });
     }
 
-    const activeAppointments = await prisma.appointment.count({
-      where: {
-        hospitalId,
-        status: { in: ['PENDING', 'CONFIRMED', 'RESCHEDULED', 'RESCHEDULE_REQUESTED'] },
-      },
-    });
-    if (activeAppointments > 0) {
-      return NextResponse.json({ error: 'ลบไม่ได้ เนื่องจากยังมีนัดหมายที่กำลังดำเนินการอยู่' }, { status: 409 });
-    }
-
     await prisma.$transaction(async (transaction) => {
+      const hospital = await transaction.hospital.findUnique({
+        where: { id: hospitalId },
+        select: { id: true },
+      });
+      if (!hospital) throw new Error('HOSPITAL_NOT_FOUND');
+
+      // Keep appointment snapshots and detach them before removing the hospital and its slots.
       await transaction.appointment.updateMany({ where: { hospitalId }, data: { hospitalId: null } });
       await transaction.hospital.delete({ where: { id: hospitalId } });
     });
     return NextResponse.json({ success: true });
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.message === 'HOSPITAL_NOT_FOUND') {
+      return NextResponse.json({ error: 'ไม่พบสถานพยาบาลที่ต้องการลบ' }, { status: 404 });
+    }
     return NextResponse.json({ error: 'ไม่สามารถลบสถานพยาบาลได้' }, { status: 500 });
   }
 }
