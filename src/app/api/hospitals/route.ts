@@ -115,7 +115,7 @@ export async function GET(req: Request) {
         let distanceStr = '';
         
         // คำนวณระยะห่าง ถ้ามีพิกัดปัจจุบันส่งมาด้วย
-        if (latitude !== null && longitude !== null && h.latitude && h.longitude) {
+        if (latitude !== null && longitude !== null && h.latitude !== null && h.longitude !== null) {
            distanceVal = getDistance(latitude, longitude, h.latitude, h.longitude);
            distanceStr = formatDistance(distanceVal);
         }
@@ -196,26 +196,30 @@ export async function GET(req: Request) {
       });
     }
 
-    if (mappedHospitals.length === 0) {
-      return NextResponse.json({ hospitals: [] });
-    }
-
     const hospitalIds = mappedHospitals.map((hospital) => hospital.id);
 
-    // Only show appointment slots explicitly configured by an administrator.
-    await prisma.hospital.createMany({
-      data: mappedHospitals.map(({ id, name, latitude, longitude }) => ({
-        id,
-        name,
-        latitude,
-        longitude,
-      })),
-      skipDuplicates: true,
-    });
+    if (mappedHospitals.length > 0) {
+      await prisma.hospital.createMany({
+        data: mappedHospitals.map(({ id, name, latitude, longitude }) => ({
+          id,
+          name,
+          latitude,
+          longitude,
+        })),
+        skipDuplicates: true,
+      });
+    }
 
-    // ดึงข้อมูลรอบคิวกลับมาส่งให้หน้าเว็บ
+    // Also include configured hospitals that have no matching map entry.
     const hospitalsWithSlots = await prisma.hospital.findMany({
-      where: { id: { in: hospitalIds } },
+      where: searchQuery
+        ? { id: { in: hospitalIds } }
+        : {
+            OR: [
+              { id: { in: hospitalIds } },
+              { slots: { some: { date: { gte: bangkokToday }, isAdminDefined: true } } },
+            ],
+          },
       include: {
         slots: {
           where: { date: { gte: bangkokToday }, isAdminDefined: true },
@@ -251,6 +255,32 @@ export async function GET(req: Request) {
       ...hospital,
       availableDates: slotsByHospitalId.get(hospital.id) ?? [],
     }));
+
+    if (!searchQuery) {
+      const mappedHospitalIds = new Set(hospitals.map((hospital) => hospital.id));
+      for (const hospital of hospitalsWithSlots) {
+        if (mappedHospitalIds.has(hospital.id)) continue;
+
+        const availableDates = slotsByHospitalId.get(hospital.id) ?? [];
+        if (availableDates.length === 0) continue;
+
+        const hasCoordinates = hospital.latitude !== null && hospital.longitude !== null;
+        const distanceVal = hasCoordinates
+          ? getDistance(latitude!, longitude!, hospital.latitude!, hospital.longitude!)
+          : Number.MAX_SAFE_INTEGER;
+        if (hasCoordinates && distanceVal > SEARCH_RADIUS_METERS / 1000) continue;
+
+        hospitals.push({
+          id: hospital.id,
+          name: hospital.name,
+          latitude: hospital.latitude ?? 0,
+          longitude: hospital.longitude ?? 0,
+          distanceVal,
+          distance: hasCoordinates ? formatDistance(distanceVal) : 'ตำแหน่งไม่ระบุ',
+          availableDates,
+        });
+      }
+    }
     
     // เรียงลำดับตามระยะทางที่ใกล้ที่สุด
     hospitals.sort((a, b) => a.distanceVal - b.distanceVal);
