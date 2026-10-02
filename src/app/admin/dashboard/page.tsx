@@ -8,6 +8,7 @@ type Tab = 'appointments' | 'slots' | 'vaccines' | 'records';
 type Appointment = {
   id: string;
   hospitalName: string;
+  hospitalId: string | null;
   scheduledAt: string;
   status: string;
   isWaitlisted: boolean;
@@ -18,12 +19,14 @@ type Appointment = {
 type Hospital = { id: string; name: string };
 type HospitalSlot = {
   id: string;
+  hospitalId: string;
   date: string;
   time: string;
   capacity: number;
   booked: number;
   isClosed: boolean;
-  hospital: { name: string };
+  isAdminDefined: boolean;
+  hospital: { id: string; name: string };
 };
 type Vaccine = { id: string; code: string; name: string; stock: number; isActive: boolean; _count: { records: number } };
 type PendingRecord = {
@@ -55,6 +58,10 @@ function formatDate(value: string) {
     timeStyle: 'short',
     timeZone: 'Asia/Bangkok',
   }).format(new Date(value));
+}
+
+function formatSlotDate(value: string) {
+  return new Date(value).toLocaleDateString('th-TH', { dateStyle: 'medium', timeZone: 'UTC' });
 }
 
 function childName(child: { firstName: string | null; lastName: string | null }) {
@@ -187,6 +194,9 @@ export default function AdminDashboardPage() {
   async function submitReschedule(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!rescheduleTarget || !newScheduledAt) return;
+    const selectedSlot = slots.find((slot) => slot.id === newScheduledAt);
+    if (!selectedSlot) return;
+    const dateString = new Date(selectedSlot.date).toISOString().slice(0, 10);
 
     await performAction(`reschedule-${rescheduleTarget.id}`, async () => {
       const response = await fetch('/api/admin/appointments', {
@@ -195,13 +205,25 @@ export default function AdminDashboardPage() {
         body: JSON.stringify({
           appointmentId: rescheduleTarget.id,
           status: 'RESCHEDULED',
-          newScheduledAt: new Date(newScheduledAt).toISOString()
+          newScheduledAt: new Date(`${dateString}T${selectedSlot.time}:00+07:00`).toISOString()
         }),
       });
       await readJson(response);
       setRescheduleTarget(null);
       setNewScheduledAt('');
-    }, 'เลื่อนนัดหมายและส่งอีเมลแจ้งผู้ปกครองแล้ว');
+    }, 'กำหนดวันนัดใหม่และส่งอีเมลแจ้งผู้ปกครองแล้ว');
+  }
+
+  async function deleteHospital(hospital: Hospital) {
+    if (!window.confirm(`ยืนยันลบชื่อสถานพยาบาล “${hospital.name}” และรอบเวลาทั้งหมดหรือไม่?`)) return;
+    await performAction(`hospital-${hospital.id}`, async () => {
+      const response = await fetch('/api/admin/slots', {
+        method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hospitalId: hospital.id }),
+      });
+      await readJson(response);
+      if (hospitalId === hospital.id) setHospitalId('');
+    }, 'ลบสถานพยาบาลแล้ว');
   }
 
   async function saveSlot(event: FormEvent<HTMLFormElement>) {
@@ -222,14 +244,16 @@ export default function AdminDashboardPage() {
     }, 'บันทึกรอบเวลาแล้ว');
   }
 
-  async function updateSlot(slotId: string, update: { capacity?: number; isClosed?: boolean }) {
+  async function updateSlot(slotId: string, update: { capacity?: number; isClosed?: boolean; isAdminDefined?: boolean }) {
     await performAction(`slot-${slotId}`, async () => {
       const response = await fetch('/api/admin/slots', {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ slotId, ...update }),
       });
       await readJson(response);
-    }, update.isClosed === undefined ? 'ปรับจำนวนคิวแล้ว' : update.isClosed ? 'ปิดรอบแล้ว' : 'เปิดรอบแล้ว');
+    }, update.isAdminDefined !== undefined
+      ? update.isAdminDefined ? 'เปิดรอบนี้ให้ผู้ใช้แล้ว' : 'ซ่อนรอบนี้จากผู้ใช้แล้ว'
+      : update.isClosed === undefined ? 'ปรับจำนวนคิวแล้ว' : update.isClosed ? 'ปิดรอบแล้ว' : 'เปิดรอบแล้ว');
   }
 
   async function createVaccine(event: FormEvent<HTMLFormElement>) {
@@ -270,7 +294,13 @@ export default function AdminDashboardPage() {
   }
 
   const availableVaccines = vaccines.filter((vaccine) => vaccine.isActive && vaccine.stock > 0);
-  const pendingAppointments = appointments.filter((appointment) => ['PENDING', 'CONFIRMED', 'RESCHEDULED'].includes(appointment.status));
+  const pendingAppointments = appointments.filter((appointment) => ['PENDING', 'CONFIRMED', 'RESCHEDULED', 'RESCHEDULE_REQUESTED'].includes(appointment.status));
+  const rescheduleSlots = rescheduleTarget
+    ? slots.filter((slot) => {
+      const scheduledAt = new Date(`${new Date(slot.date).toISOString().slice(0, 10)}T${slot.time}:00+07:00`);
+      return slot.hospitalId === rescheduleTarget.hospitalId && slot.isAdminDefined && !slot.isClosed && slot.booked < slot.capacity && scheduledAt > new Date();
+    })
+    : [];
 
   return (
     <main className="min-h-screen bg-slate-100 text-slate-900">
@@ -321,12 +351,12 @@ export default function AdminDashboardPage() {
                           <td className="p-4">{appointment.hospitalName}</td>
                           <td className="whitespace-nowrap p-4">{formatDate(appointment.scheduledAt)} {isPast && ['PENDING', 'CONFIRMED', 'RESCHEDULED'].includes(appointment.status) && <span className="ml-2 rounded text-[10px] font-bold text-rose-500">(เลยกำหนด)</span>}</td>
                           <td className="p-4">
-                            <span className={`rounded-full px-3 py-1 text-xs font-bold ${appointment.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-700' : appointment.status === 'CANCELLED' ? 'bg-slate-100 text-slate-600' : appointment.status === 'NO_SHOW' ? 'bg-rose-100 text-rose-700' : appointment.status === 'RESCHEDULED' ? 'bg-indigo-100 text-indigo-700' : appointment.status === 'CONFIRMED' ? 'bg-sky-100 text-sky-700' : 'bg-amber-100 text-amber-700'}`}>
-                              {appointment.status === 'COMPLETED' ? 'ฉีดแล้ว' : appointment.status === 'CANCELLED' ? 'ยกเลิก' : appointment.status === 'NO_SHOW' ? 'ไม่มาตามนัด' : appointment.status === 'RESCHEDULED' ? 'เลื่อนนัด' : appointment.status === 'CONFIRMED' ? 'ยืนยันคิว' : appointment.isWaitlisted ? 'คิวเต็ม · รออนุมัติ' : appointment.status === 'PENDING' ? 'รออนุมัติ' : appointment.status}
+                            <span className={`rounded-full px-3 py-1 text-xs font-bold ${appointment.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-700' : appointment.status === 'CANCELLED' ? 'bg-slate-100 text-slate-600' : appointment.status === 'NO_SHOW' ? 'bg-rose-100 text-rose-700' : appointment.status === 'RESCHEDULED' ? 'bg-indigo-100 text-indigo-700' : appointment.status === 'RESCHEDULE_REQUESTED' ? 'bg-orange-100 text-orange-700' : appointment.status === 'CONFIRMED' ? 'bg-sky-100 text-sky-700' : 'bg-amber-100 text-amber-700'}`}>
+                              {appointment.status === 'COMPLETED' ? 'ฉีดแล้ว' : appointment.status === 'CANCELLED' ? 'ยกเลิก' : appointment.status === 'NO_SHOW' ? 'ไม่มาตามนัด' : appointment.status === 'RESCHEDULED' ? 'เลื่อนนัด' : appointment.status === 'RESCHEDULE_REQUESTED' ? 'ขอเลื่อนนัด' : appointment.status === 'CONFIRMED' ? 'ยืนยันคิว' : appointment.isWaitlisted ? 'คิวเต็ม · รออนุมัติ' : appointment.status === 'PENDING' ? 'รออนุมัติ' : appointment.status}
                             </span>
                           </td>
                           <td className="min-w-[310px] p-4">
-                            {['PENDING', 'CONFIRMED', 'RESCHEDULED'].includes(appointment.status) ? (
+                            {['PENDING', 'CONFIRMED', 'RESCHEDULED', 'RESCHEDULE_REQUESTED'].includes(appointment.status) ? (
                               <div className="flex flex-wrap items-center gap-2">
                                 {/* ปุ่มสำหรับอนุมัติและฉีดวัคซีน */}
                                 {appointment.status === 'PENDING' && <button disabled={busyKey === `appointment-${appointment.id}`} onClick={() => void updateAppointment(appointment.id, 'CONFIRMED')} className="rounded-lg bg-sky-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">{appointment.isWaitlisted ? 'รับคิวเข้ารอบ' : 'อนุมัติคิว'}</button>}
@@ -341,7 +371,7 @@ export default function AdminDashboardPage() {
                                 <div className="mt-1 flex w-full gap-2">
                                   <button disabled={busyKey === `appointment-${appointment.id}`} onClick={() => { if (window.confirm('ยืนยันยกเลิกคิวนี้หรือไม่? ระบบจะคืนที่นั่งให้รอบเวลา')) void updateAppointment(appointment.id, 'CANCELLED'); }} className="rounded-lg bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50">ยกเลิก</button>
                                   <button disabled={busyKey === `appointment-${appointment.id}`} onClick={() => { if (window.confirm('ยืนยันว่าคนไข้ไม่มาตามนัด?')) void updateAppointment(appointment.id, 'NO_SHOW'); }} className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200 disabled:opacity-50">❌ ไม่มาตามนัด</button>
-                                  <button disabled={busyKey === `appointment-${appointment.id}`} onClick={() => setRescheduleTarget(appointment)} className="rounded-lg bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 hover:bg-indigo-100 disabled:opacity-50">🗓️ เลื่อนนัด</button>
+                                  <button disabled={busyKey === `reschedule-${appointment.id}`} onClick={() => { setRescheduleTarget(appointment); setNewScheduledAt(''); }} className="rounded-lg bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 hover:bg-indigo-100 disabled:opacity-50">{appointment.status === 'RESCHEDULE_REQUESTED' ? 'กำหนดวันใหม่' : 'เลื่อนนัด'}</button>
                                 </div>
                               </div>
                             ) : <span className="text-xs text-slate-400">ไม่มีการดำเนินการ</span>}
@@ -357,6 +387,17 @@ export default function AdminDashboardPage() {
 
           {activeTab === 'slots' && (
             <div className="space-y-6">
+              <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div className="border-b p-5"><h3 className="font-extrabold">รายชื่อสถานพยาบาล</h3></div>
+                <ul className="divide-y divide-slate-100">
+                  {hospitals.length === 0 ? <li className="p-5 text-sm text-slate-500">ยังไม่มีรายชื่อสถานพยาบาล</li> : hospitals.map((hospital) => (
+                    <li key={hospital.id} className="flex items-center justify-between gap-3 p-4">
+                      <span className="font-semibold">{hospital.name}</span>
+                      <button disabled={busyKey === `hospital-${hospital.id}`} onClick={() => void deleteHospital(hospital)} className="rounded-lg bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50">ลบชื่อ</button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
               <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 <h2 className="text-xl font-extrabold">เปิดรอบเวลาและกำหนดความจุ</h2>
                 <p className="mt-1 text-sm text-slate-500">รอบที่สร้างจะถูกใช้จริงในการจอง ระบบไม่สร้างรอบจำลองให้เอง</p>
@@ -374,9 +415,9 @@ export default function AdminDashboardPage() {
                 <div className="overflow-x-auto"><table className="w-full min-w-[700px] text-left text-sm">
                   <thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="p-4">วัน / เวลา</th><th className="p-4">สถานพยาบาล</th><th className="p-4">คิว</th><th className="p-4">สถานะ</th><th className="p-4">จัดการ</th></tr></thead>
                   <tbody className="divide-y divide-slate-100">{slots.length === 0 ? <tr><td colSpan={5} className="p-10 text-center text-slate-500">ยังไม่มีรอบเวลาในอนาคต</td></tr> : slots.map((slot) => <tr key={slot.id}>
-                    <td className="p-4">{formatDate(slot.date)} · {slot.time}</td><td className="p-4">{slot.hospital.name}</td><td className="p-4">{slot.booked} / {slot.capacity}</td>
-                    <td className="p-4"><span className={`rounded-full px-3 py-1 text-xs font-bold ${slot.isClosed ? 'bg-rose-100 text-rose-700' : slot.booked >= slot.capacity ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>{slot.isClosed ? 'ปิดรอบ' : slot.booked >= slot.capacity ? 'เต็ม' : 'เปิดรับ'}</span></td>
-                    <td className="p-4"><div className="flex gap-2"><button onClick={() => { const value = window.prompt('กำหนดจำนวนคิวทั้งหมด (ต้องไม่น้อยกว่าจำนวนที่จองแล้ว)', String(slot.capacity)); if (value !== null && /^\d+$/.test(value)) void updateSlot(slot.id, { capacity: Number(value) }); }} className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold">แก้ความจุ</button><button onClick={() => void updateSlot(slot.id, { isClosed: !slot.isClosed })} className={`rounded-lg px-3 py-2 text-xs font-bold ${slot.isClosed ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>{slot.isClosed ? 'เปิดรอบ' : 'ปิดฉุกเฉิน'}</button></div></td>
+                    <td className="p-4">{formatSlotDate(slot.date)} · {slot.time}</td><td className="p-4">{slot.hospital.name}</td><td className="p-4">{slot.booked} / {slot.capacity}</td>
+                    <td className="p-4"><span className={`rounded-full px-3 py-1 text-xs font-bold ${!slot.isAdminDefined ? 'bg-slate-100 text-slate-600' : slot.isClosed ? 'bg-rose-100 text-rose-700' : slot.booked >= slot.capacity ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>{!slot.isAdminDefined ? 'ยังไม่แสดงผู้ใช้' : slot.isClosed ? 'ปิดรอบ' : slot.booked >= slot.capacity ? 'เต็ม' : 'เปิดรับ'}</span></td>
+                    <td className="p-4"><div className="flex gap-2"><button onClick={() => { const value = window.prompt('กำหนดจำนวนคิวทั้งหมด (ต้องไม่น้อยกว่าจำนวนที่จองแล้ว)', String(slot.capacity)); if (value !== null && /^\d+$/.test(value)) void updateSlot(slot.id, { capacity: Number(value) }); }} className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold">แก้ความจุ</button><button onClick={() => void updateSlot(slot.id, { isClosed: !slot.isClosed })} className={`rounded-lg px-3 py-2 text-xs font-bold ${slot.isClosed ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>{slot.isClosed ? 'เปิดรอบ' : 'ปิดฉุกเฉิน'}</button><button onClick={() => void updateSlot(slot.id, { isAdminDefined: !slot.isAdminDefined })} className={`rounded-lg px-3 py-2 text-xs font-bold ${slot.isAdminDefined ? 'bg-slate-100 text-slate-700' : 'bg-teal-50 text-teal-700'}`}>{slot.isAdminDefined ? 'ซ่อนผู้ใช้' : 'แสดงผู้ใช้'}</button></div></td>
                   </tr>)}</tbody>
                 </table></div>
               </section>
@@ -427,14 +468,14 @@ export default function AdminDashboardPage() {
               กำลังเลื่อนนัดของ: <strong>{childName(rescheduleTarget.child)}</strong>
             </p>
             <label className="mt-5 block text-sm font-bold text-slate-700">
-              ระบุวันและเวลาใหม่ <span className="text-rose-500">*</span>
-              <input 
-                type="datetime-local" 
-                required 
-                value={newScheduledAt} 
-                onChange={(e) => setNewScheduledAt(e.target.value)} 
-                className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all" 
-              />
+              เลือกรอบที่เปิดรับ <span className="text-rose-500">*</span>
+              <select required value={newScheduledAt} onChange={(event) => setNewScheduledAt(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all">
+                <option value="">เลือกวันที่และเวลา</option>
+                {rescheduleSlots.map((slot) => (
+                  <option key={slot.id} value={slot.id}>{formatSlotDate(slot.date)} · {slot.time} น. · ว่าง {slot.capacity - slot.booked} คิว</option>
+                ))}
+              </select>
+              {rescheduleSlots.length === 0 && <p className="mt-2 text-xs text-rose-600">ไม่มีรอบว่างของสถานพยาบาลนี้ กรุณาเปิดรอบใหม่ก่อน</p>}
             </label>
             <div className="mt-6 flex justify-end gap-3 border-t border-slate-100 pt-4">
               <button 
@@ -449,7 +490,7 @@ export default function AdminDashboardPage() {
                 disabled={busyKey === `reschedule-${rescheduleTarget.id}`} 
                 className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-50 transition shadow-sm"
               >
-                {busyKey === `reschedule-${rescheduleTarget.id}` ? 'กำลังดำเนินการ...' : 'ยืนยันเลื่อนนัด'}
+                {busyKey === `reschedule-${rescheduleTarget.id}` ? 'กำลังดำเนินการ...' : 'กำหนดวันและส่งอีเมล'}
               </button>
             </div>
           </form>

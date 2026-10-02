@@ -76,20 +76,6 @@ function getBangkokDateKey(date: Date) {
   return `${partValues.year}-${partValues.month}-${partValues.day}`;
 }
 
-function getBangkokSlotKey(value: string | Date) {
-  const parts = new Intl.DateTimeFormat('en', {
-    timeZone: 'Asia/Bangkok',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(new Date(value));
-  const partValues = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
-  return `${partValues.year}-${partValues.month}-${partValues.day}|${partValues.hour}:${partValues.minute}`;
-}
-
 export default function ColorfulDashboard() {
   const [activeTab, setActiveTab] = useState<'overview' | 'appointments' | 'schedule' | 'tips'>('overview');
   
@@ -106,8 +92,7 @@ export default function ColorfulDashboard() {
   const [appointmentsLoading, setAppointmentsLoading] = useState(true);
   const [appointmentError, setAppointmentError] = useState('');
   const [isSavingAppointment, setIsSavingAppointment] = useState(false);
-  const [editingAppointmentId, setEditingAppointmentId] = useState<string | null>(null);
-  const [editSlotKey, setEditSlotKey] = useState('');
+  const [requestingRescheduleId, setRequestingRescheduleId] = useState<string | null>(null);
 
   // States: Child Profile
   const [childProfile, setChildProfile] = useState<ChildProfile | null>(null);
@@ -163,7 +148,7 @@ export default function ColorfulDashboard() {
         body: JSON.stringify({ email: notificationEmail })
       });
       if (!res.ok) throw new Error('บันทึกอีเมลไม่สำเร็จ');
-      notify('success', 'บันทึกอีเมลสำเร็จ', 'ระบบจะส่งการแจ้งเตือน 3 วัน และ 1 วัน ล่วงหน้า');
+      notify('success', 'บันทึกอีเมลสำเร็จ', 'ระบบจะส่งการแจ้งเตือนล่วงหน้า 7 วัน 3 วัน และ 1 วัน');
     } catch (err: any) {
       notify('error', 'ข้อผิดพลาด', err.message);
     } finally {
@@ -336,7 +321,7 @@ export default function ColorfulDashboard() {
     ? Math.ceil((Date.parse(getBangkokDateKey(nextVaccine.dueDate)) - Date.parse(todayKey)) / 86_400_000)
     : null;
   const nextAppointment = appointments.find((appointment) =>
-    ['PENDING', 'CONFIRMED'].includes(appointment.status) && new Date(appointment.scheduledAt) > new Date()
+    ['PENDING', 'CONFIRMED', 'RESCHEDULE_REQUESTED'].includes(appointment.status) && new Date(appointment.scheduledAt) > new Date()
   );
   
   const recentActivity: RecentActivity[] = [
@@ -355,6 +340,8 @@ export default function ColorfulDashboard() {
       id: `appointment-${appointment.id}`,
       title: appointment.status === 'COMPLETED'
         ? 'บันทึกการฉีดวัคซีนแล้ว'
+        : appointment.status === 'RESCHEDULE_REQUESTED'
+          ? 'ส่งคำขอเลื่อนนัดแล้ว'
         : appointment.status === 'CANCELLED'
           ? 'ยกเลิกนัดหมายแล้ว'
           : appointment.status === 'EXPIRED'
@@ -587,40 +574,27 @@ export default function ColorfulDashboard() {
     }
   };
 
-  const handleRescheduleAppointment = async (appointmentId: string) => {
-    const [date, time] = editSlotKey.split('|');
-    if (!date || !time) {
-      setAppointmentError('กรุณาเลือกช่วงเวลาใหม่');
-      notify('info', 'ยังไม่ได้เลือกเวลาใหม่', 'เลือกหนึ่งในรอบเวลาที่ยังว่าง');
-      return;
-    }
-
-    const scheduledAt = new Date(`${date}T${time}:00+07:00`);
-    if (!Number.isFinite(scheduledAt.getTime()) || scheduledAt <= new Date()) {
-      setAppointmentError('กรุณาเลือกวันและเวลาในอนาคต');
-      notify('error', 'เวลาใหม่นี้ใช้ไม่ได้', 'กรุณาเลือกวันและเวลาในอนาคต');
-      return;
-    }
-
+  const handleRequestReschedule = async (appointmentId: string) => {
+    setRequestingRescheduleId(appointmentId);
     try {
       const response = await fetch('/api/appointments', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ appointmentId, scheduledAt: scheduledAt.toISOString() }),
+        body: JSON.stringify({ appointmentId, status: 'RESCHEDULE_REQUESTED' }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'ไม่สามารถเปลี่ยนเวลานัดหมายได้');
+      if (!response.ok) throw new Error(data.error || 'ไม่สามารถส่งคำขอเลื่อนนัดได้');
       setAppointments((current) => current.map((appointment) =>
         appointment.id === appointmentId ? data.appointment : appointment
       ));
-      setEditingAppointmentId(null);
-      setEditSlotKey('');
       setAppointmentError('');
-      notify('success', 'เปลี่ยนเวลานัดแล้ว');
+      notify('success', 'ส่งคำขอเลื่อนนัดแล้ว', 'เจ้าหน้าที่จะกำหนดวันใหม่และส่งอีเมลแจ้งกลับ');
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'ไม่สามารถเปลี่ยนเวลานัดหมายได้';
+      const message = error instanceof Error ? error.message : 'ไม่สามารถส่งคำขอเลื่อนนัดได้';
       setAppointmentError(message);
-      notify('error', 'เปลี่ยนเวลานัดไม่สำเร็จ', message);
+      notify('error', 'ส่งคำขอไม่สำเร็จ', message);
+    } finally {
+      setRequestingRescheduleId(null);
     }
   };
 
@@ -1293,12 +1267,7 @@ export default function ColorfulDashboard() {
                 ) : (
                   <div className="space-y-4">
                     {visibleAppointments.map((appointment) => {
-                      const canManage = ['PENDING', 'CONFIRMED','RESCHEDULED', 'EXPIRED'].includes(appointment.status);
-                      const currentSlotKey = getBangkokSlotKey(appointment.scheduledAt);
-                      const editableSlots = appointment.hospital?.slots.filter((slot) =>
-                        slot.booked < slot.capacity ||
-                        `${new Date(slot.date).toISOString().slice(0, 10)}|${slot.time}` === currentSlotKey
-                      ) ?? [];
+                      const canManage = ['PENDING', 'CONFIRMED', 'RESCHEDULED', 'RESCHEDULE_REQUESTED', 'EXPIRED'].includes(appointment.status);
                       const statusLabel = appointment.status === 'PENDING'
   ? appointment.isWaitlisted ? 'รอคิว' : 'รอการยืนยัน'
   : appointment.status === 'CANCELLED'
@@ -1309,6 +1278,8 @@ export default function ColorfulDashboard() {
         ? 'หมดอายุ/เลยกำหนด'
         : appointment.status === 'RESCHEDULED'
           ? 'ถูกเลื่อนนัด'
+          : appointment.status === 'RESCHEDULE_REQUESTED'
+            ? 'รอเจ้าหน้าที่กำหนดวันใหม่'
           : appointment.status;
                       return (
                         <article key={appointment.id} className="p-4 rounded-2xl border-2 border-indigo-50 bg-indigo-50/20">
@@ -1320,6 +1291,7 @@ export default function ColorfulDashboard() {
   appointment.status === 'CANCELLED' ? 'bg-slate-100 text-slate-600' :
   appointment.status === 'EXPIRED' ? 'bg-rose-100 text-rose-700' :
   appointment.status === 'RESCHEDULED' ? 'bg-orange-100 text-orange-700' :
+  appointment.status === 'RESCHEDULE_REQUESTED' ? 'bg-indigo-100 text-indigo-700' :
   'bg-emerald-100 text-emerald-700'
 }`}>
   {statusLabel}
@@ -1329,18 +1301,15 @@ export default function ColorfulDashboard() {
                                 📅 {new Date(appointment.scheduledAt).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' })} น.
                               </p>
                             </div>
-                            {canManage && editingAppointmentId !== appointment.id && (
+                            {canManage && (
                               <div className="flex items-center gap-2 w-full sm:w-auto">
-  {appointment.status !== 'EXPIRED' && (
+  {!['EXPIRED', 'RESCHEDULE_REQUESTED'].includes(appointment.status) && (
     <button
-      onClick={() => {
-        setEditingAppointmentId(appointment.id);
-        setEditSlotKey(currentSlotKey);
-        setAppointmentError('');
-      }}
-      className="flex-1 sm:flex-none px-3.5 py-2 bg-amber-50 text-amber-700 hover:bg-amber-100 text-xs font-bold rounded-xl transition-all"
+      disabled={requestingRescheduleId === appointment.id}
+      onClick={() => void handleRequestReschedule(appointment.id)}
+      className="flex-1 sm:flex-none px-3.5 py-2 bg-amber-50 text-amber-700 hover:bg-amber-100 text-xs font-bold rounded-xl transition-all disabled:opacity-50"
     >
-      {appointment.status === 'RESCHEDULED' ? 'เลือกวันนัดใหม่' : 'เลื่อนนัด'}
+      {requestingRescheduleId === appointment.id ? 'กำลังส่งคำขอ...' : 'ขอเลื่อนนัด'}
     </button>
   )}
   <button
@@ -1352,47 +1321,6 @@ export default function ColorfulDashboard() {
 </div>
                             )}
                           </div>
-                          {editingAppointmentId === appointment.id && canManage && (
-                            <div className="mt-4 flex flex-col sm:flex-row gap-2">
-                              <select
-                                value={editSlotKey}
-                                onChange={(event) => setEditSlotKey(event.target.value)}
-                                className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700"
-                                aria-label="เลือกช่วงเวลาใหม่"
-                              >
-                                {editableSlots.length === 0 && <option value="">ไม่มีช่วงเวลาว่าง</option>}
-                                {editableSlots.map((slot) => {
-                                  const dateString = new Date(slot.date).toISOString().slice(0, 10);
-                                  const slotKey = `${dateString}|${slot.time}`;
-                                  const dateLabel = new Date(slot.date).toLocaleDateString('th-TH', {
-                                    dateStyle: 'medium',
-                                    timeZone: 'UTC',
-                                  });
-                                  return (
-                                    <option key={slotKey} value={slotKey}>
-                                      {dateLabel} เวลา {slot.time} น.
-                                    </option>
-                                  );
-                                })}
-                              </select>
-                              <button
-                                onClick={() => void handleRescheduleAppointment(appointment.id)}
-                                disabled={!editSlotKey || editableSlots.length === 0}
-                                className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700"
-                              >
-                                บันทึกเวลาใหม่
-                              </button>
-                              <button
-                                onClick={() => {
-                                  setEditingAppointmentId(null);
-                                  setEditSlotKey('');
-                                }}
-                                className="px-4 py-2 rounded-xl bg-slate-100 text-slate-600 text-xs font-bold hover:bg-slate-200"
-                              >
-                                ยกเลิก
-                              </button>
-                            </div>
-                          )}
                         </article>
                       );
                     })}

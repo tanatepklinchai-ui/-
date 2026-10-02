@@ -27,11 +27,14 @@ NEXTAUTH_URL="http://localhost:3000"
 ADMIN_EMAIL="authorized-admin@example.com"
 ADMIN_REGISTRATION_CODE="a-private-admin-registration-code"
 RESEND_API_KEY="your-resend-api-key"
+VAPID_SUBJECT="mailto:admin@example.com"
+VAPID_PUBLIC_KEY="your-vapid-public-key"
+VAPID_PRIVATE_KEY="your-vapid-private-key"
 ```
 
 Keep secret values out of source control. Admin registration only grants the `ADMIN` role when both the email and registration code match the server-side environment values. Admin APIs also verify the signed session and role.
 
-For a new database, run `npx prisma migrate deploy` before deploying the app. The existing database was baselined at `20260927000000_init`; later schema changes should be added as new Prisma migrations.
+Generate a VAPID key pair for Web Push with `npx web-push generate-vapid-keys` and configure all three VAPID values locally and in production. Web Push requires HTTPS in production; localhost is supported for local development. Apply the Web Push subscription migration with `npx prisma migrate deploy` before deploying the app. Existing databases were baselined at `20260927000000_init`; later schema changes should be added as new Prisma migrations.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 

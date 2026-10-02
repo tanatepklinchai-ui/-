@@ -25,6 +25,7 @@ export default function AppointmentPage() {
   const [appointments, setAppointments] = useState<AppointmentItem[]>([]);
   const [cancellationTarget, setCancellationTarget] = useState<AppointmentItem | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [requestingRescheduleId, setRequestingRescheduleId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const dismissToast = useCallback(() => setToast(null), []);
@@ -88,6 +89,25 @@ export default function AppointmentPage() {
       notify('error', 'ยกเลิกนัดหมายไม่สำเร็จ', error instanceof Error ? error.message : 'กรุณาลองใหม่อีกครั้ง');
     } finally {
       setIsCancelling(false);
+    }
+  };
+
+  const handleRequestReschedule = async (id: string) => {
+    setRequestingRescheduleId(id);
+    try {
+      const response = await fetch('/api/appointments', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ appointmentId: id, status: 'RESCHEDULE_REQUESTED' }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'ไม่สามารถส่งคำขอเลื่อนนัดได้');
+      setAppointments((current) => current.map((appointment) => appointment.id === id ? data.appointment : appointment));
+      notify('success', 'ส่งคำขอเลื่อนนัดแล้ว', 'เจ้าหน้าที่จะกำหนดวันใหม่และส่งอีเมลแจ้งกลับ');
+    } catch (error) {
+      notify('error', 'ส่งคำขอไม่สำเร็จ', error instanceof Error ? error.message : 'กรุณาลองใหม่อีกครั้ง');
+    } finally {
+      setRequestingRescheduleId(null);
     }
   };
 
@@ -175,6 +195,8 @@ export default function AppointmentPage() {
                         ? 'เสร็จสิ้น'
                         : appt.status === 'CANCELLED'
                           ? 'ยกเลิกแล้ว'
+                          : appt.status === 'RESCHEDULE_REQUESTED'
+                            ? 'รอเจ้าหน้าที่กำหนดวันใหม่'
                           : appt.isWaitlisted
                             ? 'คิวเต็ม • รออนุมัติ'
                             : appt.status === 'CONFIRMED'
@@ -182,13 +204,16 @@ export default function AppointmentPage() {
                               : 'รอรับบริการ'}
                     </span>
 
-                    {['PENDING', 'CONFIRMED'].includes(appt.status) && (
+                    {['PENDING', 'CONFIRMED', 'RESCHEDULED', 'RESCHEDULE_REQUESTED'].includes(appt.status) && (
+                      <>
+                      {appt.status !== 'RESCHEDULE_REQUESTED' && <button disabled={requestingRescheduleId === appt.id} onClick={() => void handleRequestReschedule(appt.id)} className="text-xs font-medium bg-amber-50 hover:bg-amber-100 text-amber-700 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50">{requestingRescheduleId === appt.id ? 'กำลังส่ง...' : 'ขอเลื่อนนัด'}</button>}
                       <button
                         onClick={() => setCancellationTarget(appt)}
                         className="text-xs font-medium bg-rose-50 hover:bg-rose-100 text-rose-700 px-3 py-1.5 rounded-lg transition-colors"
                       >
                         ยกเลิกนัด
                       </button>
+                      </>
                     )}
                   </div>
                 </div>

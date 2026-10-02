@@ -1,9 +1,164 @@
 // src/app/api/cron/process-queue/route.ts
+import { Prisma } from '@prisma/client';
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { sendEmail } from '@/lib/mailer'; // 👈 1. เปลี่ยนมานำเข้า sendEmail ของเรา
+import { isExpiredWebPushError, isWebPushConfigured, sendWebPushNotification } from '@/lib/webPush';
 
 export const dynamic = 'force-dynamic';
+
+function getBangkokReminderWindow(daysBefore: number, now: Date) {
+  const parts = new Intl.DateTimeFormat('en', {
+    timeZone: 'Asia/Bangkok',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  const targetDate = new Date(Date.UTC(
+    Number(values.year),
+    Number(values.month) - 1,
+    Number(values.day) - daysBefore
+  ));
+  const start = new Date(targetDate.getTime() - 7 * 60 * 60 * 1000);
+  return { gte: start, lt: new Date(start.getTime() + 24 * 60 * 60 * 1000) };
+}
+
+async function promoteWaitlistedAppointment(transaction: Prisma.TransactionClient, hospitalId: string, scheduledAt: Date) {
+  const slotKey = new Intl.DateTimeFormat('en', {
+    timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(scheduledAt);
+  const values = Object.fromEntries(slotKey.map(({ type, value }) => [type, value]));
+  const slotDate = new Date(Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day)));
+  const slotTime = `${values.hour}:${values.minute}`;
+  const slot = await transaction.hospitalSlot.findUnique({
+    where: { hospitalId_date_time: { hospitalId, date: slotDate, time: slotTime } },
+  });
+
+  if (!slot || slot.isClosed || slot.booked >= slot.capacity) {
+    return false;
+  }
+
+  const nextWaitlisted = await transaction.appointment.findFirst({
+    where: {
+      hospitalId,
+      scheduledAt,
+      status: 'PENDING',
+      isWaitlisted: true,
+    },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+  });
+
+  if (!nextWaitlisted) {
+    return false;
+  }
+
+  const updateResult = await transaction.appointment.updateMany({
+    where: { id: nextWaitlisted.id, status: 'PENDING', isWaitlisted: true },
+    data: {
+      status: 'CONFIRMED',
+      isWaitlisted: false,
+      notified7Days: false,
+      notified3Days: false,
+      notified1Day: false,
+      notified1Hour: false,
+    },
+  });
+
+  if (updateResult.count !== 1) {
+    return false;
+  }
+
+  await transaction.hospitalSlot.updateMany({
+    where: { id: slot.id, isClosed: false, booked: { lt: slot.capacity } },
+    data: { booked: { increment: 1 } },
+  });
+
+  return true;
+}
+
+async function sendAppointmentReminders(now: Date) {
+  const reminders = [
+    { days: 7, flag: 'notified7Days', title: '🔔 แจ้งเตือน: อีก 7 วันคุณมีนัดฉีดวัคซีน - พร้อมฉีด' },
+    { days: 3, flag: 'notified3Days', title: '🔔 แจ้งเตือน: อีก 3 วันคุณมีนัดฉีดวัคซีน - พร้อมฉีด' },
+    { days: 1, flag: 'notified1Day', title: '⏰ พรุ่งนี้คุณมีนัดฉีดวัคซีน - พร้อมฉีด' },
+  ] as const;
+  const counts = { notified7DaysCount: 0, notified3DaysCount: 0, notified1DayCount: 0 };
+
+  for (const reminder of reminders) {
+    const appointments = await prisma.appointment.findMany({
+      where: {
+        status: { in: ['PENDING', 'CONFIRMED', 'RESCHEDULED'] },
+        [reminder.flag]: false,
+        scheduledAt: getBangkokReminderWindow(reminder.days, now),
+      },
+      include: { user: { include: { pushSubscriptions: true } } },
+    });
+
+    for (const appointment of appointments) {
+      const targetEmail = appointment.user.notificationEmail || appointment.user.email;
+      let delivered = false;
+
+      if (targetEmail) {
+        try {
+          await sendEmail({
+            to: targetEmail,
+            subject: reminder.title,
+            html: `<div style="font-family: sans-serif; padding: 20px;">
+              <h2 style="color: #0d9488;">ระบบพร้อมฉีด (PromChid)</h2>
+              <p>สวัสดีคุณ <strong>${appointment.user.username}</strong></p>
+              <p>คุณมีนัดหมายเข้ารับการฉีดวัคซีนในอีก <strong>${reminder.days} วัน</strong></p>
+              <div style="background-color: #f8fafc; padding: 15px; border-radius: 10px; margin: 15px 0;">
+                <p>🏥 <strong>สถานที่:</strong> ${appointment.hospitalName}</p>
+                <p>🗓️ <strong>วัน-เวลา:</strong> ${new Date(appointment.scheduledAt).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })} น.</p>
+              </div>
+              <p style="color: #64748b; font-size: 13px;">กรุณาเตรียมสมุดวัคซีนและเดินทางไปถึงก่อนเวลานัดหมาย 15 นาที</p>
+            </div>`,
+          });
+          delivered = true;
+        } catch (error) {
+          console.error(`Failed to send ${reminder.days}-day appointment email reminder:`, error);
+        }
+      }
+
+      if (isWebPushConfigured()) {
+        for (const subscription of appointment.user.pushSubscriptions) {
+          try {
+            await sendWebPushNotification(subscription, {
+              title: reminder.title,
+              body: `คุณมีนัดรับวัคซีนในอีก ${reminder.days} วัน`,
+              url: '/user/appointment',
+            });
+            delivered = true;
+          } catch (error) {
+            console.error(`Failed to send ${reminder.days}-day appointment push reminder:`, error);
+            if (isExpiredWebPushError(error)) {
+              try {
+                await prisma.webPushSubscription.deleteMany({ where: { id: subscription.id } });
+              } catch (cleanupError) {
+                console.error('Failed to remove expired Web Push subscription:', cleanupError);
+              }
+            }
+          }
+        }
+      }
+
+      if (delivered) {
+        await prisma.appointment.update({
+          where: { id: appointment.id },
+          data: { [reminder.flag]: true },
+        });
+      }
+    }
+
+    if (reminder.days === 7) counts.notified7DaysCount = appointments.length;
+    if (reminder.days === 3) counts.notified3DaysCount = appointments.length;
+    if (reminder.days === 1) counts.notified1DayCount = appointments.length;
+  }
+
+  return counts;
+}
 
 export async function GET(req: Request) {
   const authHeader = req.headers.get('authorization');
@@ -13,90 +168,7 @@ export async function GET(req: Request) {
 
   try {
     const now = new Date();
-
-    // 1. แจ้งเตือนล่วงหน้า 3 วัน (ช่วง 71 - 73 ชั่วโมงข้างหน้า)
-    const threeDaysStart = new Date(now.getTime() + 71 * 60 * 60 * 1000);
-    const threeDaysEnd = new Date(now.getTime() + 73 * 60 * 60 * 1000);
-    const appts3Days = await prisma.appointment.findMany({
-      where: {
-        status: { in: ['PENDING', 'CONFIRMED'] },
-        notified3Days: false,
-        scheduledAt: { gte: threeDaysStart, lte: threeDaysEnd },
-      },
-      include: { user: true },
-    });
-
-    for (const appt of appts3Days) {
-      const targetEmail = appt.user.notificationEmail || appt.user.email;
-      if (targetEmail) {
-        try {
-          // 👉 2. เปลี่ยนมาใช้ sendEmail แทน resend.emails.send
-          await sendEmail({
-            to: targetEmail,
-            subject: '🔔 แจ้งเตือน: อีก 3 วันคุณมีนัดฉีดวัคซีน - พร้อมฉีด',
-            html: `<div style="font-family: sans-serif; padding: 20px;">
-              <h2 style="color: #0d9488;">ระบบพร้อมฉีด (PromChid)</h2>
-              <p>สวัสดีคุณ <strong>${appt.user.username}</strong></p>
-              <p>คุณมีนัดหมายเข้ารับการฉีดวัคซีนในอีก <strong>3 วันข้างหน้า</strong></p>
-              <div style="background-color: #f8fafc; padding: 15px; border-radius: 10px; margin: 15px 0;">
-                <p>🏥 <strong>สถานที่:</strong> ${appt.hospitalName}</p>
-                <p>🗓️ <strong>วัน-เวลา:</strong> ${new Date(appt.scheduledAt).toLocaleString('th-TH')} น.</p>
-              </div>
-              <p style="color: #64748b; font-size: 13px;">กรุณาเตรียมสมุดวัคซีนสีชมพูให้พร้อม และเดินทางไปถึงก่อนเวลานัดหมาย 15 นาทีครับ</p>
-            </div>`,
-          });
-          
-          await prisma.appointment.update({
-            where: { id: appt.id },
-            data: { notified3Days: true },
-          });
-        } catch (err) {
-          console.error(`Failed to send 3-day alert:`, err);
-        }
-      }
-    }
-
-    // 2. แจ้งเตือนล่วงหน้า 1 วัน (ช่วง 23 - 25 ชั่วโมงข้างหน้า)
-    const oneDayStart = new Date(now.getTime() + 23 * 60 * 60 * 1000);
-    const oneDayEnd = new Date(now.getTime() + 25 * 60 * 60 * 1000);
-    const appts1Day = await prisma.appointment.findMany({
-      where: {
-        status: { in: ['PENDING', 'CONFIRMED'] },
-        notified1Day: false,
-        scheduledAt: { gte: oneDayStart, lte: oneDayEnd },
-      },
-      include: { user: true },
-    });
-
-    for (const appt of appts1Day) {
-      const targetEmail = appt.user.notificationEmail || appt.user.email;
-      if (targetEmail) {
-        try {
-          // 👉 3. เปลี่ยนมาใช้ sendEmail สำหรับแจ้งเตือน 1 วัน
-          await sendEmail({
-            to: targetEmail,
-            subject: '⏰ พรุ่งนี้คุณมีนัดฉีดวัคซีน - พร้อมฉีด',
-            html: `<div style="font-family: sans-serif; padding: 20px;">
-              <h2 style="color: #0d9488;">ระบบพร้อมฉีด (PromChid)</h2>
-              <p>สวัสดีคุณ <strong>${appt.user.username}</strong></p>
-              <p>พรุ่งนี้คุณมีนัดเข้ารับการฉีดวัคซีนแล้วครับ!</p>
-              <div style="background-color: #fffbeb; padding: 15px; border-radius: 10px; margin: 15px 0; border: 1px solid #fde68a;">
-                <p>🏥 <strong>สถานที่:</strong> ${appt.hospitalName}</p>
-                <p>🗓️ <strong>วัน-เวลา:</strong> ${new Date(appt.scheduledAt).toLocaleString('th-TH')} น.</p>
-              </div>
-              <p style="color: #64748b; font-size: 13px;">ขอให้เดินทางปลอดภัยครับ</p>
-            </div>`,
-          });
-          
-          await prisma.appointment.update({
-            where: { id: appt.id },
-            data: { notified1Day: true },
-          });
-        } catch (err) {
-          console.error(`Failed to send 1-day alert:`, err);
-        }
-      }
-    }
+    const reminderCounts = await sendAppointmentReminders(now);
 
     // 3. เคลียร์คิวที่เลยกำหนดเกิน 1 ชั่วโมง
     const expiredThreshold = new Date(now.getTime() - 60 * 60 * 1000);
@@ -122,14 +194,15 @@ export async function GET(req: Request) {
             where: { hospitalId: appointment.hospitalId, date: slotDate, time: `${values.hour}:${values.minute}`, booked: { gt: 0 } },
             data: { booked: { decrement: 1 } },
           });
+          await promoteWaitlistedAppointment(transaction, appointment.hospitalId, appointment.scheduledAt);
         }
         return true;
       });
       if (expired) expiredCount += 1;
     }
 
-    return NextResponse.json({ success: true, notified3DaysCount: appts3Days.length, notified1DayCount: appts1Day.length, expiredCount });
-  } catch (error: unknown) {
+    return NextResponse.json({ success: true, ...reminderCounts, expiredCount });
+  } catch {
     return NextResponse.json({ success: false, error: 'เกิดข้อผิดพลาดในการรันคิวแจ้งเตือน' }, { status: 500 });
   }
 }

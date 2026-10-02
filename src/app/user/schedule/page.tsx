@@ -56,7 +56,7 @@ export default function ScheduleWebAppPage() {
         <div className="hidden md:flex items-center space-x-6">
           <Link href="/user/dashboard" className="text-sm font-medium text-slate-500 hover:text-blue-600 transition">หน้าหลัก</Link>
           <Link href="/user/schedule" className="text-sm font-bold text-blue-600 border-b-2 border-blue-600 pb-1">ตารางวัคซีน</Link>
-          <Link href="/user/notifications" className="text-sm font-medium text-slate-500 hover:text-blue-600 transition">การแจ้งเตือน</Link>
+          <Link href="/user/settings" className="text-sm font-medium text-slate-500 hover:text-blue-600 transition">การแจ้งเตือน</Link>
           <Link href="/user/settings" className="text-sm font-medium text-slate-500 hover:text-blue-600 transition">ตั้งค่า</Link>
         </div>
 

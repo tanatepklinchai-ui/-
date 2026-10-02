@@ -7,8 +7,6 @@ export const dynamic = 'force-dynamic';
 const DEFAULT_LATITUDE = 15.1389;
 const DEFAULT_LONGITUDE = 100.2755;
 const SEARCH_RADIUS_METERS = 15_000;
-const SLOT_TIMES = ['09:00', '10:00', '11:00', '13:00', '14:00', '15:00'];
-const SLOT_CAPACITY = 10;
 
 type OverpassElement = {
   type: string;
@@ -29,7 +27,7 @@ type Hospital = {
   availableDates: { date: string; dateString: string; slots: string[]; fullSlots: string[] }[];
 };
 
-function getUpcomingBusinessDates() {
+function getBangkokToday() {
   const dateParts = new Intl.DateTimeFormat('en', {
     timeZone: 'Asia/Bangkok',
     year: 'numeric',
@@ -42,17 +40,7 @@ function getUpcomingBusinessDates() {
     Number(partValues.month) - 1,
     Number(partValues.day)
   ));
-  const businessDates: Date[] = [];
-
-  while (businessDates.length < 3) {
-    currentDate.setUTCDate(currentDate.getUTCDate() + 1);
-    const dayOfWeek = currentDate.getUTCDay();
-    if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-      businessDates.push(new Date(currentDate));
-    }
-  }
-
-  return businessDates;
+  return currentDate;
 }
 
 function formatSlotDate(date: Date) {
@@ -105,7 +93,7 @@ export async function GET(req: Request) {
   }
 
   let mappedHospitals: Hospital[] = [];
-  const businessDates = getUpcomingBusinessDates();
+  const bangkokToday = getBangkokToday();
 
   try {
     if (searchQuery) {
@@ -212,31 +200,15 @@ export async function GET(req: Request) {
 
     const hospitalIds = mappedHospitals.map((hospital) => hospital.id);
 
-    // นำรายชื่อเข้า Database และสร้างรอบคิว (Slots) อัตโนมัติใน 3 วันข้างหน้า
-    await prisma.$transaction(async (transaction) => {
-      await transaction.hospital.createMany({
-        data: mappedHospitals.map(({ id, name, latitude, longitude }) => ({
-          id,
-          name,
-          latitude,
-          longitude,
-        })),
-        skipDuplicates: true,
-      });
-
-      await transaction.hospitalSlot.createMany({
-        data: mappedHospitals.flatMap(({ id }) =>
-          businessDates.flatMap((date) =>
-            SLOT_TIMES.map((time) => ({
-              hospitalId: id,
-              date,
-              time,
-              capacity: SLOT_CAPACITY,
-            }))
-          )
-        ),
-        skipDuplicates: true,
-      });
+    // Only show appointment slots explicitly configured by an administrator.
+    await prisma.hospital.createMany({
+      data: mappedHospitals.map(({ id, name, latitude, longitude }) => ({
+        id,
+        name,
+        latitude,
+        longitude,
+      })),
+      skipDuplicates: true,
     });
 
     // ดึงข้อมูลรอบคิวกลับมาส่งให้หน้าเว็บ
@@ -244,7 +216,7 @@ export async function GET(req: Request) {
       where: { id: { in: hospitalIds } },
       include: {
         slots: {
-          where: { date: { in: businessDates } },
+          where: { date: { gte: bangkokToday }, isAdminDefined: true },
           orderBy: [{ date: 'asc' }, { time: 'asc' }],
         },
       },
@@ -252,7 +224,10 @@ export async function GET(req: Request) {
 
     const slotsByHospitalId = new Map(hospitalsWithSlots.map((hospital) => {
       const dateGroups = new Map<string, { date: string; dateString: string; slots: string[]; fullSlots: string[] }>();
-      hospital.slots.filter((slot) => !slot.isClosed).forEach((slot) => {
+      hospital.slots.filter((slot) => {
+        const scheduledAt = new Date(`${slot.date.toISOString().slice(0, 10)}T${slot.time}:00+07:00`);
+        return !slot.isClosed && scheduledAt > new Date();
+      }).forEach((slot) => {
         const dateString = slot.date.toISOString().slice(0, 10);
         const group = dateGroups.get(dateString) ?? {
           date: formatSlotDate(slot.date),

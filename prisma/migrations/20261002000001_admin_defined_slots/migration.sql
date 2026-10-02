@@ -1,0 +1,2 @@
+ALTER TABLE "HospitalSlot"
+ADD COLUMN "isAdminDefined" BOOLEAN NOT NULL DEFAULT false;

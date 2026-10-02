@@ -27,6 +27,20 @@ model User {
   appointments   Appointment[]
   vaccineRecords VaccineRecord[]
   vaccineRequests VaccineRequest[]
+  pushSubscriptions WebPushSubscription[]
+}
+
+model WebPushSubscription {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
 }
 
 model Profile {
@@ -87,6 +101,7 @@ model HospitalSlot {
   capacity   Int      @default(10) // จำนวนคิวที่รับได้ในเวลานั้น (เต็มแล้วซ่อน)
   booked     Int      @default(0) // จำนวนคิวที่ถูกจองไปแล้ว
   isClosed   Boolean  @default(false)
+  isAdminDefined Boolean @default(false)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
@@ -104,6 +119,7 @@ model Appointment {
   hospitalName  String
   scheduledAt   DateTime
   requestedVaccine String?   // <--- เพิ่มบรรทัดนี้ (เพื่อเก็บชื่อวัคซีนที่ผู้ใช้เลือก)
+  notified7Days Boolean   @default(false)
   notified3Days Boolean   @default(false)
   notified1Day  Boolean   @default(false)
   notified1Hour Boolean  @default(false)

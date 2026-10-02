@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth';
@@ -50,6 +51,54 @@ function appointmentInclude() {
       },
     },
   };
+}
+
+async function promoteWaitlistedAppointment(transaction: Prisma.TransactionClient, hospitalId: string, scheduledAt: Date) {
+  const slotKey = getBangkokSlot(scheduledAt);
+  const slot = await transaction.hospitalSlot.findUnique({
+    where: { hospitalId_date_time: { hospitalId, date: slotKey.date, time: slotKey.time } },
+  });
+
+  if (!slot || slot.isClosed || slot.booked >= slot.capacity) {
+    return false;
+  }
+
+  const nextWaitlisted = await transaction.appointment.findFirst({
+    where: {
+      hospitalId,
+      scheduledAt,
+      status: 'PENDING',
+      isWaitlisted: true,
+    },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+  });
+
+  if (!nextWaitlisted) {
+    return false;
+  }
+
+  const updateResult = await transaction.appointment.updateMany({
+    where: { id: nextWaitlisted.id, status: 'PENDING', isWaitlisted: true },
+    data: {
+      status: 'CONFIRMED',
+      isWaitlisted: false,
+      notified7Days: false,
+      notified3Days: false,
+      notified1Day: false,
+      notified1Hour: false,
+    },
+  });
+
+  if (updateResult.count !== 1) {
+    return false;
+  }
+
+  await transaction.hospitalSlot.updateMany({
+    where: { id: slot.id, isClosed: false, booked: { lt: slot.capacity } },
+    data: { booked: { increment: 1 } },
+  });
+
+  return true;
 }
 
 export async function GET(req: Request) {
@@ -123,7 +172,7 @@ export async function POST(req: Request) {
       const slot = await transaction.hospitalSlot.findUnique({
         where: { hospitalId_date_time: { hospitalId, date, time } },
       });
-      if (!slot) {
+      if (!slot || !slot.isAdminDefined) {
         throw new AppointmentRequestError('ช่วงเวลานี้ไม่ได้เปิดให้จองแล้ว', 409);
       }
       if (slot.isClosed) {
@@ -187,26 +236,33 @@ export async function PATCH(req: Request) {
 
   try {
     const body = await req.json();
-    const { appointmentId, scheduledAt, status } = body;
+    const { appointmentId, status } = body;
 
     if (
       typeof appointmentId !== 'string' ||
-      (status !== 'CANCELLED' && !isValidAppointmentDate(scheduledAt)) ||
-      (status !== undefined && status !== 'CANCELLED')
+      !['CANCELLED', 'RESCHEDULE_REQUESTED'].includes(status)
     ) {
       return NextResponse.json({ error: 'ข้อมูลนัดหมายไม่ถูกต้อง' }, { status: 400 });
     }
 
-    const appointmentDate = status === 'CANCELLED' ? null : new Date(scheduledAt);
-    const newSlot = appointmentDate ? getBangkokSlot(appointmentDate) : null;
     const appointment = await prisma.$transaction(async (transaction) => {
       const currentAppointment = await transaction.appointment.findFirst({
         where: { id: appointmentId, userId: session.userId },
       });
-      
-      // ปลดล็อกให้สามารถแก้ไข/ลบ รายการที่ EXPIRED และ RESCHEDULED ได้
-      if (!currentAppointment || !['PENDING', 'CONFIRMED', 'EXPIRED', 'RESCHEDULED'].includes(currentAppointment.status)) {
+
+      if (!currentAppointment || !['PENDING', 'CONFIRMED', 'EXPIRED', 'RESCHEDULED', 'RESCHEDULE_REQUESTED'].includes(currentAppointment.status)) {
         throw new AppointmentRequestError('ไม่พบนัดหมายหรือไม่สามารถแก้ไขนัดหมายนี้ได้', 404);
+      }
+
+      if (status === 'RESCHEDULE_REQUESTED') {
+        if (!['PENDING', 'CONFIRMED', 'RESCHEDULED'].includes(currentAppointment.status)) {
+          throw new AppointmentRequestError('นัดหมายนี้ไม่สามารถส่งคำขอเลื่อนได้', 409);
+        }
+        return transaction.appointment.update({
+          where: { id: appointmentId },
+          data: { status: 'RESCHEDULE_REQUESTED' },
+          include: appointmentInclude(),
+        });
       }
 
       if (status === 'CANCELLED') {
@@ -221,6 +277,7 @@ export async function PATCH(req: Request) {
             },
             data: { booked: { decrement: 1 } },
           });
+          await promoteWaitlistedAppointment(transaction, currentAppointment.hospitalId, currentAppointment.scheduledAt);
         }
 
         return transaction.appointment.update({
@@ -229,80 +286,7 @@ export async function PATCH(req: Request) {
           include: appointmentInclude(),
         });
       }
-
-      if (!currentAppointment.hospitalId || !appointmentDate || !newSlot) {
-        throw new AppointmentRequestError('ไม่สามารถเปลี่ยนเวลานัดหมายนี้ได้', 409);
-      }
-
-      const currentSlot = getBangkokSlot(currentAppointment.scheduledAt);
-      const isSameSlot = currentSlot.date.getTime() === newSlot.date.getTime() &&
-        currentSlot.time === newSlot.time;
-
-      const targetSlot = await transaction.hospitalSlot.findUnique({
-        where: {
-          hospitalId_date_time: {
-            hospitalId: currentAppointment.hospitalId,
-            date: newSlot.date,
-            time: newSlot.time,
-          },
-        },
-      });
-      if (!targetSlot || targetSlot.isClosed) {
-        throw new AppointmentRequestError('ช่วงเวลาใหม่ไม่ได้เปิดให้จอง', 409);
-      }
-
-      if (currentAppointment.isWaitlisted) {
-        const reservation = await transaction.hospitalSlot.updateMany({
-          where: { id: targetSlot.id, isClosed: false, booked: { lt: targetSlot.capacity } },
-          data: { booked: { increment: 1 } },
-        });
-        if (reservation.count === 1) {
-          return transaction.appointment.update({
-            where: { id: appointmentId },
-            data: { scheduledAt: appointmentDate, status: 'CONFIRMED', isWaitlisted: false },
-            include: appointmentInclude(),
-          });
-        }
-
-        const latestSlot = await transaction.hospitalSlot.findUnique({ where: { id: targetSlot.id } });
-        if (!latestSlot || latestSlot.isClosed) {
-          throw new AppointmentRequestError('ช่วงเวลาใหม่ปิดรับจองแล้ว', 409);
-        }
-        return transaction.appointment.update({
-          where: { id: appointmentId },
-          data: { scheduledAt: appointmentDate, status: 'PENDING', isWaitlisted: true },
-          include: appointmentInclude(),
-        });
-      }
-      
-      let newStatus = 'CONFIRMED';
-      let newIsWaitlisted = false;
-      
-      if (!isSameSlot) {
-        const reservation = await transaction.hospitalSlot.updateMany({
-          where: { id: targetSlot.id, isClosed: false, booked: { lt: targetSlot.capacity } },
-          data: { booked: { increment: 1 } },
-        });
-        if (reservation.count !== 1) {
-          throw new AppointmentRequestError('ช่วงเวลาใหม่เต็มแล้ว กรุณาเลือกเวลาอื่น', 409);
-        }
-
-        await transaction.hospitalSlot.updateMany({
-          where: { hospitalId: currentAppointment.hospitalId, date: currentSlot.date, time: currentSlot.time, booked: { gt: 0 } },
-          data: { booked: { decrement: 1 } },
-        });
-      }
-
-      // เปลี่ยนสถานะกลับเป็น CONFIRMED เมื่อเลื่อนนัดสำเร็จ
-      return transaction.appointment.update({
-        where: { id: appointmentId },
-        data: { 
-          scheduledAt: appointmentDate, 
-          status: newStatus,
-          isWaitlisted: newIsWaitlisted 
-        },
-        include: appointmentInclude(),
-      });
+      throw new AppointmentRequestError('ข้อมูลนัดหมายไม่ถูกต้อง', 400);
     });
 
     return NextResponse.json({ success: true, appointment });

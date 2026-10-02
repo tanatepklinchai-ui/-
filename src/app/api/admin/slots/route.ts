@@ -15,21 +15,59 @@ function parseDateOnly(value: unknown) {
   return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value ? date : null;
 }
 
+function getBangkokToday() {
+  const parts = new Intl.DateTimeFormat('en', {
+    timeZone: 'Asia/Bangkok',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return new Date(Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day)));
+}
+
 export async function GET() {
   if (!(await isAdmin())) return NextResponse.json({ error: 'ไม่มีสิทธิ์เข้าถึงข้อมูลนี้' }, { status: 403 });
   try {
     const [hospitals, slots] = await Promise.all([
       prisma.hospital.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true } }),
       prisma.hospitalSlot.findMany({
-        where: { date: { gte: new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00.000Z`) } },
-        include: { hospital: { select: { name: true } } },
+        where: { date: { gte: getBangkokToday() } },
+        include: { hospital: { select: { id: true, name: true } } },
         orderBy: [{ date: 'asc' }, { time: 'asc' }],
-        take: 500,
       }),
     ]);
     return NextResponse.json({ hospitals, slots });
   } catch {
     return NextResponse.json({ error: 'ไม่สามารถโหลดรอบเวลาได้' }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: Request) {
+  if (!(await isAdmin())) return NextResponse.json({ error: 'ไม่มีสิทธิ์ดำเนินการนี้' }, { status: 403 });
+  try {
+    const { hospitalId } = await req.json();
+    if (typeof hospitalId !== 'string') {
+      return NextResponse.json({ error: 'ข้อมูลสถานพยาบาลไม่ถูกต้อง' }, { status: 400 });
+    }
+
+    const activeAppointments = await prisma.appointment.count({
+      where: {
+        hospitalId,
+        status: { in: ['PENDING', 'CONFIRMED', 'RESCHEDULED', 'RESCHEDULE_REQUESTED'] },
+      },
+    });
+    if (activeAppointments > 0) {
+      return NextResponse.json({ error: 'ลบไม่ได้ เนื่องจากยังมีนัดหมายที่กำลังดำเนินการอยู่' }, { status: 409 });
+    }
+
+    await prisma.$transaction(async (transaction) => {
+      await transaction.appointment.updateMany({ where: { hospitalId }, data: { hospitalId: null } });
+      await transaction.hospital.delete({ where: { id: hospitalId } });
+    });
+    return NextResponse.json({ success: true });
+  } catch {
+    return NextResponse.json({ error: 'ไม่สามารถลบสถานพยาบาลได้' }, { status: 500 });
   }
 }
 
@@ -65,10 +103,10 @@ export async function POST(req: Request) {
       if (existing) {
         return transaction.hospitalSlot.update({
           where: { id: existing.id },
-          data: { capacity, isClosed: false },
+          data: { capacity, isClosed: false, isAdminDefined: true },
         });
       }
-      return transaction.hospitalSlot.create({ data: { hospitalId, date, time, capacity } });
+      return transaction.hospitalSlot.create({ data: { hospitalId, date, time, capacity, isAdminDefined: true } });
     });
     return NextResponse.json({ success: true, slot }, { status: 201 });
   } catch (error) {
@@ -83,8 +121,8 @@ export async function PATCH(req: Request) {
   if (!(await isAdmin())) return NextResponse.json({ error: 'ไม่มีสิทธิ์ดำเนินการนี้' }, { status: 403 });
   try {
     const body = await req.json();
-    const { slotId, capacity, isClosed } = body;
-    if (typeof slotId !== 'string' || (capacity === undefined && typeof isClosed !== 'boolean')) {
+    const { slotId, capacity, isClosed, isAdminDefined } = body;
+    if (typeof slotId !== 'string' || (capacity === undefined && typeof isClosed !== 'boolean' && typeof isAdminDefined !== 'boolean')) {
       return NextResponse.json({ error: 'ข้อมูลรอบเวลาไม่ถูกต้อง' }, { status: 400 });
     }
     if (capacity !== undefined && (!Number.isInteger(capacity) || capacity < 1 || capacity > 500)) {
@@ -97,7 +135,11 @@ export async function PATCH(req: Request) {
     }
     const result = await prisma.hospitalSlot.updateMany({
       where: { id: slotId, booked: { lte: capacity ?? current.capacity } },
-      data: { ...(capacity !== undefined ? { capacity } : {}), ...(typeof isClosed === 'boolean' ? { isClosed } : {}) },
+      data: {
+        ...(capacity !== undefined ? { capacity } : {}),
+        ...(typeof isClosed === 'boolean' ? { isClosed } : {}),
+        ...(typeof isAdminDefined === 'boolean' ? { isAdminDefined } : {}),
+      },
     });
     if (result.count !== 1) return NextResponse.json({ error: 'รอบเวลามีการจองเปลี่ยนแปลง กรุณาลองอีกครั้ง' }, { status: 409 });
     const slot = await prisma.hospitalSlot.findUnique({ where: { id: slotId }, include: { hospital: { select: { name: true } } } });

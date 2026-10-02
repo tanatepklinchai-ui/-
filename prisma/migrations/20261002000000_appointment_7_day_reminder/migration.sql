@@ -1,0 +1,2 @@
+ALTER TABLE "Appointment"
+ADD COLUMN "notified7Days" BOOLEAN NOT NULL DEFAULT false;
