@@ -102,6 +102,7 @@ export async function GET(req: Request) {
       // โหมดที่ 1: ค้นหาจากข้อความ (พิมพ์ชื่อ)
       const dbHospitals = await prisma.hospital.findMany({
         where: {
+          isActive: true,
           name: {
             contains: searchQuery,
             mode: 'insensitive' // ค้นหาแบบไม่สนใจตัวพิมพ์เล็ก/ใหญ่ (สำหรับ PostgreSQL)
@@ -213,8 +214,9 @@ export async function GET(req: Request) {
     // Also include configured hospitals that have no matching map entry.
     const hospitalsWithSlots = await prisma.hospital.findMany({
       where: searchQuery
-        ? { id: { in: hospitalIds } }
+        ? { id: { in: hospitalIds }, isActive: true }
         : {
+            isActive: true,
             OR: [
               { id: { in: hospitalIds } },
               { slots: { some: { date: { gte: bangkokToday }, isAdminDefined: true } } },
@@ -251,7 +253,8 @@ export async function GET(req: Request) {
       })
     );
 
-    const hospitals: Hospital[] = mappedHospitals.map((hospital) => ({
+    const activeHospitalIds = new Set(hospitalsWithSlots.map(({ id }) => id));
+    const hospitals: Hospital[] = mappedHospitals.filter(({ id }) => activeHospitalIds.has(id)).map((hospital) => ({
       ...hospital,
       availableDates: slotsByHospitalId.get(hospital.id) ?? [],
     }));

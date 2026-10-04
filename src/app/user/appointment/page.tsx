@@ -84,7 +84,7 @@ export default function AppointmentPage() {
       if (!response.ok) throw new Error(data.error || 'ไม่สามารถยกเลิกนัดหมายได้');
       setAppointments((current) => current.filter((appointment) => appointment.id !== id));
       setCancellationTarget(null);
-      notify('success', 'ยกเลิกนัดหมายแล้ว', 'คืนที่นั่งให้รอบเวลาเรียบร้อย');
+      notify('success', 'ยกเลิกนัดหมายแล้ว');
     } catch (error) {
       notify('error', 'ยกเลิกนัดหมายไม่สำเร็จ', error instanceof Error ? error.message : 'กรุณาลองใหม่อีกครั้ง');
     } finally {
@@ -131,7 +131,7 @@ export default function AppointmentPage() {
         {/* เลือกเด็กและไปยังระบบจอง */}
         <section className="bg-white rounded-2xl border border-slate-100 p-6 md:p-8 shadow-xs">
           <h2 className="text-lg font-semibold text-slate-800 mb-1">นัดหมายรับวัคซีน</h2>
-          <p className="text-xs text-slate-500 mb-5">เลือกเด็กเพื่อดูรายการนัดหมาย หรือไปค้นหาสถานพยาบาลและรอบเวลาว่าง</p>
+          <p className="text-xs text-slate-500 mb-5">เลือกเด็กเพื่อดูนัดหมาย หรือกำหนดวันและเวลาที่ต้องการได้โดยไม่ต้องรอรอบว่าง</p>
           {children.length > 0 ? (
             <label className="block max-w-md text-xs font-medium text-slate-600">
               เด็ก

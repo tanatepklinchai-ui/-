@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth';
-import { sendEmail } from '@/lib/mailer'; // 👈 1. เปลี่ยนมานำเข้า sendEmail ของเรา
+import { notifyAppointmentUpdate } from '@/lib/appointmentNotifications';
 
 class RequestError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
@@ -50,6 +50,7 @@ async function promoteWaitlistedAppointment(transaction: Prisma.TransactionClien
     data: {
       status: 'CONFIRMED',
       isWaitlisted: false,
+      usesCapacity: true,
       notified7Days: false,
       notified3Days: false,
       notified1Day: false,
@@ -94,8 +95,27 @@ export async function PATCH(req: Request) {
   try {
     const body = await req.json();
     const { appointmentId, status, newScheduledAt } = body;
-    
-    if (typeof appointmentId !== 'string' || !['CONFIRMED', 'CANCELLED', 'NO_SHOW', 'RESCHEDULED'].includes(status)) {
+
+    if (typeof appointmentId !== 'string') {
+      return NextResponse.json({ error: 'ข้อมูลการจัดการคิวไม่ถูกต้อง' }, { status: 400 });
+    }
+
+    if (status === 'NOTIFY') {
+      const appointment = await prisma.appointment.findUnique({
+        where: { id: appointmentId },
+        include: { user: true },
+      });
+      if (!appointment) return NextResponse.json({ error: 'ไม่พบนัดหมายที่ต้องการแจ้งเตือน' }, { status: 404 });
+      const notification = await notifyAppointmentUpdate({
+        user: appointment.user,
+        appointment,
+        title: 'แจ้งเตือนนัดหมายวัคซีน - พร้อมฉีด',
+        message: 'มีการแจ้งเตือนเกี่ยวกับนัดหมายวัคซีนของคุณ',
+      });
+      return NextResponse.json({ success: true, ...notification });
+    }
+
+    if (!['CONFIRMED', 'CANCELLED', 'NO_SHOW', 'RESCHEDULED'].includes(status)) {
       return NextResponse.json({ error: 'ข้อมูลการจัดการคิวไม่ถูกต้อง' }, { status: 400 });
     }
 
@@ -123,30 +143,11 @@ export async function PATCH(req: Request) {
       if (status === 'CONFIRMED' && current.status === 'CONFIRMED') return current;
 
       if (status === 'RESCHEDULED') {
-        if (!current.hospitalId || !newAppointmentDate) {
-          throw new RequestError('นัดหมายนี้ไม่มีสถานพยาบาลสำหรับกำหนดวันใหม่', 409);
-        }
-
-        const targetKey = getBangkokSlot(newAppointmentDate);
-        const targetSlot = await transaction.hospitalSlot.findUnique({
-          where: { hospitalId_date_time: { hospitalId: current.hospitalId, date: targetKey.date, time: targetKey.time } },
-        });
-        if (!targetSlot || targetSlot.isClosed || !targetSlot.isAdminDefined) {
-          throw new RequestError('วันและเวลานี้ไม่ได้เปิดรับจอง', 409);
-        }
-
+        if (!newAppointmentDate) throw new RequestError('กรุณาระบุวันและเวลาใหม่', 400);
         const currentKey = getBangkokSlot(current.scheduledAt);
+        const targetKey = getBangkokSlot(newAppointmentDate);
         const isSameSlot = currentKey.date.getTime() === targetKey.date.getTime() && currentKey.time === targetKey.time;
-        const retainsCurrentSeat = !current.isWaitlisted && current.status !== 'RESCHEDULED';
-        if (!(isSameSlot && retainsCurrentSeat)) {
-          const reservation = await transaction.hospitalSlot.updateMany({
-            where: { id: targetSlot.id, isClosed: false, booked: { lt: targetSlot.capacity } },
-            data: { booked: { increment: 1 } },
-          });
-          if (reservation.count !== 1) throw new RequestError('รอบเวลาใหม่เต็มแล้ว กรุณาเลือกเวลาอื่น', 409);
-        }
-
-        if (!isSameSlot && retainsCurrentSeat) {
+        if (!isSameSlot && current.usesCapacity && current.hospitalId && !current.isWaitlisted) {
           await transaction.hospitalSlot.updateMany({
             where: {
               hospitalId: current.hospitalId,
@@ -156,6 +157,7 @@ export async function PATCH(req: Request) {
             },
             data: { booked: { decrement: 1 } },
           });
+          await promoteWaitlistedAppointment(transaction, current.hospitalId, current.scheduledAt);
         }
 
         const updated = await transaction.appointment.updateMany({
@@ -164,6 +166,7 @@ export async function PATCH(req: Request) {
             scheduledAt: newAppointmentDate,
             status: 'CONFIRMED',
             isWaitlisted: false,
+            usesCapacity: isSameSlot && current.usesCapacity,
             notified7Days: false,
             notified3Days: false,
             notified1Day: false,
@@ -190,7 +193,10 @@ export async function PATCH(req: Request) {
 
       const dataToUpdate = {
         status, 
-        ...(status === 'CONFIRMED' ? { isWaitlisted: false } : {}) 
+        ...(status === 'CONFIRMED' ? {
+          isWaitlisted: false,
+          usesCapacity: current.isWaitlisted ? true : current.usesCapacity,
+        } : {})
       };
 
       const statusUpdate = await transaction.appointment.updateMany({
@@ -199,7 +205,7 @@ export async function PATCH(req: Request) {
       });
       if (statusUpdate.count !== 1) throw new RequestError('คิวมีการเปลี่ยนแปลง กรุณาโหลดใหม่', 409);
 
-      if (['CANCELLED', 'NO_SHOW'].includes(status) && current.hospitalId && !current.isWaitlisted) {
+      if (['CANCELLED', 'NO_SHOW'].includes(status) && current.hospitalId && current.usesCapacity && !current.isWaitlisted) {
         const slotKey = getBangkokSlot(current.scheduledAt);
         await transaction.hospitalSlot.updateMany({
           where: { hospitalId: current.hospitalId, date: slotKey.date, time: slotKey.time, booked: { gt: 0 } },
@@ -215,29 +221,13 @@ export async function PATCH(req: Request) {
     });
 
     if (status === 'RESCHEDULED' && appointment?.user) {
-      const targetEmail = appointment.user.notificationEmail || appointment.user.email;
-      if (targetEmail) {
-        const formattedDate = new Date(appointment.scheduledAt).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Bangkok' });
-        try {
-          await sendEmail({
-            to: targetEmail,
-            subject: '🗓️ แจ้งวันนัดฉีดวัคซีนใหม่ - พร้อมฉีด',
-            html: `
-              <div style="font-family: sans-serif; padding: 20px; max-width: 500px; margin: auto; border: 1px solid #e2e8f0; border-radius: 12px;">
-                <h2 style="color: #0d9488; margin-top: 0;">ระบบพร้อมฉีด (PromChid)</h2>
-                <p>สวัสดีคุณ <strong>${appointment.user.username}</strong></p>
-                <p>เจ้าหน้าที่กำหนดวันนัดหมายใหม่ของคุณที่ <strong>${appointment.hospitalName}</strong> เรียบร้อยแล้ว:</p>
-                <div style="background-color: #f8fafc; padding: 16px; border-radius: 8px; margin: 16px 0;">
-                  <p style="margin: 4px 0;">🗓️ <strong>วัน-เวลานัดใหม่:</strong> ${formattedDate} น.</p>
-                </div>
-                <p style="font-size: 13px; color: #64748b;">หากมีข้อสงสัย กรุณาติดต่อสถานพยาบาลตามข้อมูลนัดหมาย</p>
-              </div>
-            `
-          });
-        } catch (err) {
-          console.error('Failed to send reschedule email:', err);
-        }
-      }
+      const notification = await notifyAppointmentUpdate({
+        user: appointment.user,
+        appointment,
+        title: 'แจ้งวันนัดฉีดวัคซีนใหม่ - พร้อมฉีด',
+        message: 'เจ้าหน้าที่กำหนดวันนัดหมายใหม่ให้คุณแล้ว',
+      });
+      return NextResponse.json({ success: true, appointment, ...notification });
     }
 
     return NextResponse.json({ success: true, appointment });

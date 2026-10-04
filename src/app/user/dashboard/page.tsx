@@ -2,6 +2,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { VACCINE_SCHEDULE } from '@/lib/vaccineSchedule';
 import { calculateAgeDisplay } from '@/lib/utils/formatAge';
 import NotificationToast from '@/components/NotificationToast';
@@ -11,7 +12,6 @@ type HospitalOption = {
   id: string;
   name: string;
   distance: string;
-  availableDates: { date: string; dateString: string; slots: string[]; fullSlots: string[] }[];
 };
 
 type Appointment = {
@@ -76,6 +76,20 @@ function getBangkokDateKey(date: Date) {
   return `${partValues.year}-${partValues.month}-${partValues.day}`;
 }
 
+function getBangkokDateTimeInput(date: Date) {
+  const parts = new Intl.DateTimeFormat('en', {
+    timeZone: 'Asia/Bangkok',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}`;
+}
+
 export default function ColorfulDashboard() {
   const [activeTab, setActiveTab] = useState<'overview' | 'appointments' | 'schedule' | 'tips'>('overview');
   
@@ -83,7 +97,7 @@ export default function ColorfulDashboard() {
   const [isLocating, setIsLocating] = useState(false);
   const [hospitalSearchQuery, setHospitalSearchQuery] = useState('');
   const [selectedHospital, setSelectedHospital] = useState<string | null>(null);
-  const [selectedDateSlot, setSelectedDateSlot] = useState<{date: string, dateString: string, time: string, isWaitlistRequest?: boolean} | null>(null);
+  const [bookingDateTime, setBookingDateTime] = useState('');
   const [vaccineToBook, setVaccineToBook] = useState<{ name: string; age: string } | null>(null);
   const [realHospitals, setRealHospitals] = useState<HospitalOption[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -123,37 +137,8 @@ export default function ColorfulDashboard() {
 
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const dismissToast = useCallback(() => setToast(null), []);
-  // --- States: Email Notification ---
-  const [notificationEmail, setNotificationEmail] = useState('');
-  const [isSavingEmail, setIsSavingEmail] = useState(false);
-
   const notify = (type: ToastMessage['type'], title: string, description?: string) => {
     setToast({ type, title, description });
-  };
-  
-  useEffect(() => {
-    fetch('/api/user/settings')
-      .then(res => res.json())
-      .then(data => { if (data.email) setNotificationEmail(data.email); })
-      .catch(() => {});
-  }, []);
-
-  const handleSaveEmail = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsSavingEmail(true);
-    try {
-      const res = await fetch('/api/user/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: notificationEmail })
-      });
-      if (!res.ok) throw new Error('บันทึกอีเมลไม่สำเร็จ');
-      notify('success', 'บันทึกอีเมลสำเร็จ', 'ระบบจะส่งการแจ้งเตือนล่วงหน้า 7 วัน 3 วัน และ 1 วัน');
-    } catch (err: any) {
-      notify('error', 'ข้อผิดพลาด', err.message);
-    } finally {
-      setIsSavingEmail(false);
-    }
   };
   
   // ดึงรายการวัคซีนทางเลือก
@@ -469,13 +454,13 @@ export default function ColorfulDashboard() {
           const hospitals = data.hospitals ?? [];
           setRealHospitals(hospitals);
           setSelectedHospital(null);
-          setSelectedDateSlot(null);
+          setBookingDateTime('');
 
           // 👉 2. แจ้งเตือนเมื่อดึงข้อมูลเสร็จแล้ว
           if (hospitals.length > 0) {
             notify('success', 'ค้นพบสถานพยาบาลแล้ว', `แสดงผล ${hospitals.length} แห่งในบริเวณใกล้เคียง`);
           } else {
-            notify('warning', 'ไม่มีสถานพยาบาลใกล้เคียง', 'ไม่พบสถานพยาบาลที่เปิดรับจองในรัศมีของคุณขณะนี้');
+            notify('warning', 'ไม่มีสถานพยาบาลใกล้เคียง', 'ไม่พบสถานพยาบาลในรัศมีที่ค้นหา');
           }
 
         } catch (error) {
@@ -501,8 +486,8 @@ export default function ColorfulDashboard() {
       setAppointmentError('กรุณาเลือกเด็กก่อนจองนัดหมาย');
       return;
     }
-    if (!selectedHospital || !selectedDateSlot) {
-      notify('info', 'เลือกสถานพยาบาลและรอบเวลาก่อน', 'เลือกสถานพยาบาลใกล้คุณ แล้วแตะเวลาที่ต้องการจอง');
+    if (!selectedHospital || !bookingDateTime) {
+      notify('info', 'เลือกสถานพยาบาลและวันนัดก่อน', 'เลือกสถานพยาบาล แล้วกำหนดวันและเวลาที่ต้องการ');
       return;
     }
 
@@ -517,7 +502,7 @@ export default function ColorfulDashboard() {
     setIsSavingAppointment(true);
     setAppointmentError('');
     try {
-      const scheduledAt = new Date(`${selectedDateSlot.dateString}T${selectedDateSlot.time}:00+07:00`);
+      const scheduledAt = new Date(`${bookingDateTime}:00+07:00`);
       const response = await fetch('/api/appointments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -535,12 +520,12 @@ export default function ColorfulDashboard() {
         (a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime()
       ));
       setSelectedHospital(null);
-      setSelectedDateSlot(null);
+      setBookingDateTime('');
       setVaccineToBook(null);
       notify(
-        data.waitlisted ? 'info' : 'success',
-        data.waitlisted ? 'คิวเต็ม กำลังรออนุมัติ' : 'ยืนยันการจองแล้ว',
-        `${hospital.name} · ${selectedDateSlot.date} เวลา ${selectedDateSlot.time} น.`
+        'success',
+        'ส่งคำขอนัดหมายแล้ว',
+        `${hospital.name} · ${new Intl.DateTimeFormat('th-TH', { dateStyle: 'medium', timeZone: 'Asia/Bangkok' }).format(scheduledAt)} เวลา ${bookingDateTime.slice(11)} น.`
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : 'ไม่สามารถบันทึกนัดหมายได้';
@@ -646,7 +631,12 @@ export default function ColorfulDashboard() {
             <button onClick={() => setActiveTab('tips')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl font-bold text-sm transition-all ${activeTab === 'tips' ? 'bg-teal-500 text-white shadow-lg shadow-teal-200' : 'text-slate-600 hover:bg-slate-50'}`}><span>🧸</span> คำแนะนำก่อน-หลังฉีด</button>
           </nav>
         </div>
-        <button onClick={handleLogout} className="flex items-center justify-center gap-2 text-xs font-bold text-pink-500 hover:text-pink-600 bg-pink-50 hover:bg-pink-100 p-3.5 rounded-2xl transition-colors w-full"><span>🚪</span> ออกจากระบบ</button>
+        <div className="space-y-2">
+          <Link href="/user/settings" className="flex items-center justify-center gap-2 rounded-2xl bg-teal-50 p-3.5 text-xs font-bold text-teal-700 transition-colors hover:bg-teal-100">
+            <span>🔔</span> ตั้งค่าการแจ้งเตือน
+          </Link>
+          <button onClick={handleLogout} className="flex w-full items-center justify-center gap-2 rounded-2xl bg-pink-50 p-3.5 text-xs font-bold text-pink-500 transition-colors hover:bg-pink-100"><span>🚪</span> ออกจากระบบ</button>
+        </div>
       </aside>
 
       {/* 2. MAIN CONTENT AREA */}
@@ -658,7 +648,10 @@ export default function ColorfulDashboard() {
             <div className="w-9 h-9 bg-gradient-to-tr from-teal-400 to-teal-300 rounded-xl flex items-center justify-center text-white font-bold shadow-md">พ</div>
             <span className="font-extrabold text-lg text-teal-800">พร้อมฉีด</span>
           </div>
-          <button onClick={handleLogout} className="text-xs font-bold text-pink-500 bg-pink-50 px-3 py-1.5 rounded-full">ออกจากระบบ</button>
+          <div className="flex items-center gap-2">
+            <Link href="/user/settings" className="rounded-full bg-teal-50 px-3 py-1.5 text-xs font-bold text-teal-700">🔔 แจ้งเตือน</Link>
+            <button onClick={handleLogout} className="rounded-full bg-pink-50 px-3 py-1.5 text-xs font-bold text-pink-500">ออกจากระบบ</button>
+          </div>
         </header>
 
         {/* 3. TOP NAVIGATION TABS (สำหรับสลับหน้าจอในมือถือ) */}
@@ -746,13 +739,14 @@ export default function ColorfulDashboard() {
                   <p className="text-xs font-bold text-slate-500">ความคืบหน้าการรับวัคซีน</p>
                   {vaccineRows.length > 0 ? (
                     <>
+                      <p className="mt-2 text-sm font-bold text-slate-700">{verifiedVaccineCount} จาก {vaccineRows.length} รายการ</p>
                       <div className="mt-3 flex items-center gap-3">
                         <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-label="ความคืบหน้าการรับวัคซีน" aria-valuemin={0} aria-valuemax={100} aria-valuenow={vaccineProgress}>
                           <div className="h-full rounded-full bg-gradient-to-r from-teal-500 to-emerald-400 transition-all duration-500" style={{ width: `${vaccineProgress}%` }} />
                         </div>
                         <span className="min-w-10 text-right text-sm font-extrabold text-teal-800">{vaccineProgress}%</span>
                       </div>
-                      <p className="mt-2 text-[11px] text-slate-500">นับเฉพาะรายการที่เจ้าหน้าที่ยืนยันแล้ว</p>
+                      <p className="mt-2 text-[11px] text-slate-500">เปอร์เซ็นต์คำนวณจากรายการที่เจ้าหน้าที่ยืนยันแล้ว</p>
                     </>
                   ) : (
                     <p className="mt-3 text-sm font-semibold text-slate-500">เพิ่มวันเกิดเพื่อคำนวณกำหนดวัคซีน</p>
@@ -1147,7 +1141,7 @@ export default function ColorfulDashboard() {
                   <div className="text-center py-12 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
                     <div className="text-4xl mb-3">🏥</div>
                     <p className="text-slate-600 font-bold text-sm">ยังไม่ได้เลือกสถานพยาบาล</p>
-                    <p className="text-slate-400 text-xs mt-1">พิมพ์ชื่อโรงพยาบาล หรือกดปุ่มค้นหาด้วย GPS เพื่อดูรอบเวลาว่าง</p>
+                    <p className="text-slate-400 text-xs mt-1">พิมพ์ชื่อสถานพยาบาล หรือค้นหาด้วย GPS แล้วเลือกวันและเวลาที่ต้องการเอง</p>
                   </div>
                 ) : (
                   <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
@@ -1156,7 +1150,7 @@ export default function ColorfulDashboard() {
                         key={hospital.id}
                         className={`border-2 rounded-2xl p-5 transition-all cursor-pointer ${selectedHospital === hospital.id ? 'border-rose-400 bg-rose-50/40 shadow-md' : 'border-slate-100 bg-white hover:border-rose-200'}`}
                         onClick={() => {
-                          if (selectedHospital !== hospital.id) setSelectedDateSlot(null);
+                          if (selectedHospital !== hospital.id) setBookingDateTime('');
                           setSelectedHospital(hospital.id);
                         }}
                       >
@@ -1175,58 +1169,19 @@ export default function ColorfulDashboard() {
                         </div>
 
                         {selectedHospital === hospital.id && (
-                          <div className="mt-5 pt-5 border-t border-rose-100 animate-fade-in-up">
-                            {hospital.availableDates.length === 0 ? (
-                              <div className="bg-slate-50 p-4 rounded-xl text-center border border-slate-100">
-                                <p className="text-sm font-bold text-slate-600">ไม่มีช่วงเวลาว่างในขณะนี้</p>
-                                <p className="text-xs text-slate-400 mt-1">โปรดตรวจสอบใหม่ในภายหลัง หรือเลือกสถานพยาบาลอื่น</p>
-                              </div>
-                            ) : (
-                              <>
-                                <p className="text-xs font-bold text-slate-700 mb-3 flex items-center gap-2"><span>🗓️</span> เลือกรอบเวลาที่ต้องการนัดหมาย:</p>
-                                <div className="space-y-5">
-                                  {hospital.availableDates.map((availableDate) => (
-                                    <div key={availableDate.dateString}>
-                                      <p className="text-sm font-extrabold text-rose-700 mb-2.5">{availableDate.date}</p>
-                                      <div className="flex flex-wrap gap-2.5">
-                                        {availableDate.slots.map((time) => {
-                                          const isSelected = selectedDateSlot?.dateString === availableDate.dateString && selectedDateSlot?.time === time;
-                                          return (
-                                            <button
-                                              key={time}
-                                              onClick={(event) => {
-                                                event.stopPropagation();
-                                                setSelectedDateSlot({ date: availableDate.date, dateString: availableDate.dateString, time, isWaitlistRequest: false });
-                                              }}
-                                              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all active:scale-95 ${isSelected ? 'bg-rose-600 text-white shadow-md shadow-rose-200 ring-2 ring-rose-600 ring-offset-1' : 'bg-white border border-slate-200 text-slate-700 hover:border-rose-400 hover:text-rose-600'}`}
-                                            >
-                                              {time} น.
-                                            </button>
-                                          );
-                                        })}
-                                        {availableDate.fullSlots.map((time) => {
-                                          const isSelected = selectedDateSlot?.dateString === availableDate.dateString && selectedDateSlot?.time === time;
-                                          return (
-                                            <button
-                                              key={`waitlist-${time}`}
-                                              onClick={(event) => {
-                                                event.stopPropagation();
-                                                setSelectedDateSlot({ date: availableDate.date, dateString: availableDate.dateString, time, isWaitlistRequest: true });
-                                              }}
-                                              className={`flex flex-col items-center px-3 py-1.5 rounded-xl border text-[10px] font-bold transition-all active:scale-95 ${isSelected ? 'border-amber-500 bg-amber-500 text-white shadow-md shadow-amber-200 ring-2 ring-amber-500 ring-offset-1' : 'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100'}`}
-                                              title="รอบนี้เต็ม แตะเพื่อส่งคำขอรออนุมัติ"
-                                            >
-                                              <span className="text-xs">{time} น.</span>
-                                              <span className="opacity-80">เต็ม • จองคิวสำรอง</span>
-                                            </button>
-                                          );
-                                        })}
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              </>
-                            )}
+                          <div className="mt-5 space-y-3 border-t border-rose-100 pt-5 animate-fade-in-up">
+                            <p className="text-xs font-bold text-slate-700">เลือกวันและเวลาที่สะดวก ระบบจะส่งคำขอให้เจ้าหน้าที่อนุมัติ (ไม่ต้องรอรอบว่าง)</p>
+                            <label className="block text-xs font-semibold text-slate-600" onClick={(event) => event.stopPropagation()}>
+                              วันและเวลา
+                              <input
+                                type="datetime-local"
+                                required
+                                min={getBangkokDateTimeInput(new Date())}
+                                value={bookingDateTime}
+                                onChange={(event) => setBookingDateTime(event.target.value)}
+                                className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800"
+                              />
+                            </label>
                           </div>
                         )}
                       </div>
@@ -1234,7 +1189,7 @@ export default function ColorfulDashboard() {
                   </div>
                 )}
 
-                {selectedHospital && selectedDateSlot && (
+                {selectedHospital && bookingDateTime && (
                   <div className="mt-8 animate-fade-in-up">
                     <button
                       onClick={handleBooking}
@@ -1243,10 +1198,8 @@ export default function ColorfulDashboard() {
                     >
                       {isSavingAppointment ? (
                          <><svg className="animate-spin w-5 h-5 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> กำลังส่งคำขอ...</>
-                      ) : selectedDateSlot.isWaitlistRequest ? (
-                         <>📝 ส่งคำขอจองคิวสำรอง (รออนุมัติ)</>
                       ) : (
-                         <>✅ ยืนยันการจองคิว</>
+                         <>📨 ส่งคำขอนัดหมายเพื่อรออนุมัติ</>
                       )}
                     </button>
                   </div>

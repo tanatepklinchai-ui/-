@@ -16,7 +16,7 @@ type Appointment = {
   user: { username: string; email: string };
   child: { firstName: string | null; lastName: string | null; dob: string | null };
 };
-type Hospital = { id: string; name: string };
+type Hospital = { id: string; name: string; isActive: boolean };
 type HospitalSlot = {
   id: string;
   hospitalId: string;
@@ -64,6 +64,20 @@ function formatSlotDate(value: string) {
   return new Date(value).toLocaleDateString('th-TH', { dateStyle: 'medium', timeZone: 'UTC' });
 }
 
+function getBangkokDateTimeInput(date: Date) {
+  const parts = new Intl.DateTimeFormat('en', {
+    timeZone: 'Asia/Bangkok',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}`;
+}
+
 function childName(child: { firstName: string | null; lastName: string | null }) {
   return [child.firstName, child.lastName].filter(Boolean).join(' ') || 'ไม่ระบุชื่อเด็ก';
 }
@@ -79,6 +93,8 @@ export default function AdminDashboardPage() {
   const [selectedVaccines, setSelectedVaccines] = useState<Record<string, string>>({});
   const [hospitalId, setHospitalId] = useState('');
   const [hospitalName, setHospitalName] = useState('');
+  const [hospitalNameEdits, setHospitalNameEdits] = useState<Record<string, string>>({});
+  const [searchTerm, setSearchTerm] = useState('');
   const [slotDate, setSlotDate] = useState('');
   const [slotTime, setSlotTime] = useState('09:00');
   const [slotCapacity, setSlotCapacity] = useState(10);
@@ -90,6 +106,7 @@ export default function AdminDashboardPage() {
   const [busyKey, setBusyKey] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [noticeIsWarning, setNoticeIsWarning] = useState(false);
 
   // States สำหรับเลื่อนนัดหมาย
   const [rescheduleTarget, setRescheduleTarget] = useState<Appointment | null>(null);
@@ -154,13 +171,19 @@ export default function AdminDashboardPage() {
     return () => { isMounted = false; };
   }, []);
 
-  async function performAction(key: string, action: () => Promise<void>, successMessage: string) {
+  async function performAction(
+    key: string,
+    action: () => Promise<string | { message: string; warning?: boolean } | void>,
+    successMessage: string
+  ) {
     setBusyKey(key);
     setError('');
     setNotice('');
+    setNoticeIsWarning(false);
     try {
-      await action();
-      setNotice(successMessage);
+      const result = await action();
+      setNotice(typeof result === 'string' ? result : result?.message || successMessage);
+      setNoticeIsWarning(typeof result === 'object' && result !== null && result.warning === true);
       await loadData();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'ดำเนินการไม่สำเร็จ');
@@ -194,9 +217,6 @@ export default function AdminDashboardPage() {
   async function submitReschedule(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!rescheduleTarget || !newScheduledAt) return;
-    const selectedSlot = slots.find((slot) => slot.id === newScheduledAt);
-    if (!selectedSlot) return;
-    const dateString = new Date(selectedSlot.date).toISOString().slice(0, 10);
 
     await performAction(`reschedule-${rescheduleTarget.id}`, async () => {
       const response = await fetch('/api/admin/appointments', {
@@ -205,13 +225,32 @@ export default function AdminDashboardPage() {
         body: JSON.stringify({
           appointmentId: rescheduleTarget.id,
           status: 'RESCHEDULED',
-          newScheduledAt: new Date(`${dateString}T${selectedSlot.time}:00+07:00`).toISOString()
+          newScheduledAt: new Date(`${newScheduledAt}:00+07:00`).toISOString()
         }),
       });
-      await readJson(response);
+      const result = await readJson<{ emailSent: boolean; webPushSent: boolean; delivered: boolean }>(response);
       setRescheduleTarget(null);
       setNewScheduledAt('');
+      if (!result.delivered) return { message: 'เลื่อนนัดแล้ว แต่ส่งการแจ้งเตือนไม่สำเร็จ กรุณาตรวจสอบอีเมลหรือการตั้งค่า Push', warning: true };
+      if (!result.emailSent) return { message: 'เลื่อนนัดแล้วและส่งแจ้งเตือนบนเว็บแล้ว แต่อีเมลส่งไม่สำเร็จ', warning: true };
+      if (!result.webPushSent) return { message: 'เลื่อนนัดแล้วและส่งอีเมลแล้ว (ผู้ใช้ยังไม่ได้เปิด Push)', warning: true };
     }, 'กำหนดวันนัดใหม่และส่งอีเมลแจ้งผู้ปกครองแล้ว');
+  }
+
+  async function sendAppointmentNotification(appointmentId: string) {
+    await performAction(`notify-${appointmentId}`, async () => {
+      const response = await fetch('/api/admin/appointments', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ appointmentId, status: 'NOTIFY' }),
+      });
+      const result = await readJson<{ emailSent: boolean; webPushSent: boolean; delivered: boolean }>(response);
+      if (!result.delivered) return { message: 'ส่งไม่สำเร็จ: ผู้ใช้ยังไม่มีช่องทางแจ้งเตือนที่พร้อมใช้งาน', warning: true };
+      if (result.emailSent && result.webPushSent) return 'ส่งแจ้งเตือนทางอีเมลและเว็บแล้ว';
+      return result.emailSent
+        ? 'ส่งอีเมลแจ้งเตือนแล้ว (ผู้ใช้ยังไม่ได้เปิด Push)'
+        : { message: 'ส่งแจ้งเตือนบนเว็บแล้ว แต่อีเมลส่งไม่สำเร็จ', warning: true };
+    }, 'ส่งแจ้งเตือนแล้ว');
   }
 
   async function deleteHospital(hospital: Hospital) {
@@ -224,6 +263,17 @@ export default function AdminDashboardPage() {
       await readJson(response);
       if (hospitalId === hospital.id) setHospitalId('');
     }, 'ลบสถานพยาบาลแล้ว');
+  }
+
+  async function updateHospital(hospitalId: string, update: { name?: string; isActive?: boolean }) {
+    await performAction(`hospital-${hospitalId}`, async () => {
+      const response = await fetch('/api/admin/hospitals', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hospitalId, ...update }),
+      });
+      await readJson(response);
+    }, update.name !== undefined ? 'บันทึกชื่อสถานพยาบาลแล้ว' : update.isActive ? 'เปิดสถานพยาบาลแล้ว' : 'ปิดสถานพยาบาลแล้ว');
   }
 
   async function saveSlot(event: FormEvent<HTMLFormElement>) {
@@ -295,12 +345,29 @@ export default function AdminDashboardPage() {
 
   const availableVaccines = vaccines.filter((vaccine) => vaccine.isActive && vaccine.stock > 0);
   const pendingAppointments = appointments.filter((appointment) => ['PENDING', 'CONFIRMED', 'RESCHEDULED', 'RESCHEDULE_REQUESTED'].includes(appointment.status));
-  const rescheduleSlots = rescheduleTarget
-    ? slots.filter((slot) => {
-      const scheduledAt = new Date(`${new Date(slot.date).toISOString().slice(0, 10)}T${slot.time}:00+07:00`);
-      return slot.hospitalId === rescheduleTarget.hospitalId && slot.isAdminDefined && !slot.isClosed && slot.booked < slot.capacity && scheduledAt > new Date();
-    })
-    : [];
+  const normalizedSearch = searchTerm.trim().toLocaleLowerCase();
+  const matchesSearch = (...values: (string | null | undefined)[]) =>
+    !normalizedSearch || values.some((value) => value?.toLocaleLowerCase().includes(normalizedSearch));
+  const filteredAppointments = appointments.filter((appointment) => matchesSearch(
+    appointment.id,
+    appointment.user.username,
+    appointment.user.email,
+    childName(appointment.child),
+    appointment.hospitalName,
+    appointment.requestedVaccine,
+    appointment.status
+  ));
+  const filteredHospitals = hospitals.filter((hospital) => matchesSearch(hospital.name, hospital.id));
+  const filteredSlots = slots.filter((slot) => matchesSearch(slot.hospital.name, slot.time));
+  const filteredVaccines = vaccines.filter((vaccine) => matchesSearch(vaccine.code, vaccine.name));
+  const filteredRecords = records.filter((record) => matchesSearch(
+    record.user.username,
+    record.user.email,
+    childName(record.child),
+    record.vaccineName,
+    record.vaccineCode,
+    record.hospitalName
+  ));
 
   return (
     <main className="min-h-screen bg-slate-100 text-slate-900">
@@ -321,22 +388,43 @@ export default function AdminDashboardPage() {
               {tab.label}{tab.id === 'records' && records.length > 0 ? ` (${records.length})` : ''}
             </button>
           ))}
-          <button onClick={() => void loadData()} className="ml-auto rounded-xl px-4 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100">รีเฟรชข้อมูล</button>
+          <label className="flex min-w-48 flex-1 items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-500 sm:max-w-sm">
+            <span aria-hidden="true">⌕</span>
+            <input
+              type="search"
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              placeholder="ค้นหาโรงพยาบาล วัคซีน ผู้ใช้ หรือการจอง"
+              aria-label="ค้นหาโรงพยาบาล วัคซีน ผู้ใช้ หรือการจอง"
+              className="min-w-0 flex-1 outline-none"
+            />
+          </label>
+          <button onClick={() => void loadData()} className="rounded-xl px-4 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100">รีเฟรชข้อมูล</button>
         </nav>
 
-        {error && <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm font-medium text-rose-700">{error}</p>}
-        {notice && <p role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-700">{notice}</p>}
+        {error && (
+          <div role="alert" className="fixed right-4 top-4 z-50 flex w-[min(24rem,calc(100%-2rem))] items-start justify-between gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm font-medium text-rose-700 shadow-xl">
+            <span>{error}</span>
+            <button onClick={() => setError('')} aria-label="ปิดข้อความ" className="shrink-0">✕</button>
+          </div>
+        )}
+        {notice && (
+          <div role="status" className={`fixed right-4 top-4 z-50 flex w-[min(24rem,calc(100%-2rem))] items-start justify-between gap-3 rounded-xl border p-4 text-sm font-medium shadow-xl ${noticeIsWarning ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+            <span>{notice}</span>
+            <button onClick={() => setNotice('')} aria-label="ปิดข้อความ" className="shrink-0">✕</button>
+          </div>
+        )}
         {isLoading ? <p className="rounded-2xl bg-white p-10 text-center text-slate-500">กำลังโหลดข้อมูล...</p> : <>
           {activeTab === 'appointments' && (
             <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
               <div className="flex flex-col gap-1 border-b p-5 sm:flex-row sm:items-end sm:justify-between">
-                <div><h2 className="text-xl font-extrabold">รายการนัดหมายและคิวรับบริการ</h2><p className="mt-1 text-sm text-slate-500">คิวรอดำเนินการ {pendingAppointments.length} รายการ</p></div>
+              <div><h2 className="text-xl font-extrabold">รายการนัดหมายและคิวรับบริการ</h2><p className="mt-1 text-sm text-slate-500">คิวรอดำเนินการ {pendingAppointments.length} รายการ · พบ {filteredAppointments.length} รายการ</p></div>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[900px] text-left text-sm">
                   <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="p-4">เด็ก / ผู้ปกครอง</th><th className="p-4">สถานพยาบาล</th><th className="p-4">วันและเวลา</th><th className="p-4">สถานะ</th><th className="p-4">จัดการ</th></tr></thead>
                   <tbody className="divide-y divide-slate-100">
-                    {appointments.length === 0 ? <tr><td colSpan={5} className="p-10 text-center text-slate-500">ยังไม่มีรายการนัดหมาย</td></tr> : appointments.map((appointment) => {
+                    {filteredAppointments.length === 0 ? <tr><td colSpan={5} className="p-10 text-center text-slate-500">{appointments.length ? 'ไม่พบรายการที่ตรงกับคำค้นหา' : 'ยังไม่มีรายการนัดหมาย'}</td></tr> : filteredAppointments.map((appointment) => {
                       const isPast = new Date(appointment.scheduledAt) < new Date();
                       
                       return (
@@ -375,6 +463,13 @@ export default function AdminDashboardPage() {
                                 </div>
                               </div>
                             ) : <span className="text-xs text-slate-400">ไม่มีการดำเนินการ</span>}
+                            <button
+                              disabled={busyKey === `notify-${appointment.id}`}
+                              onClick={() => void sendAppointmentNotification(appointment.id)}
+                              className="mt-2 rounded-lg bg-teal-50 px-3 py-2 text-xs font-bold text-teal-700 hover:bg-teal-100 disabled:opacity-50"
+                            >
+                              {busyKey === `notify-${appointment.id}` ? 'กำลังส่ง...' : 'ส่งแจ้งเตือนตอนนี้'}
+                            </button>
                           </td>
                         </tr>
                       );
@@ -390,19 +485,36 @@ export default function AdminDashboardPage() {
               <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                 <div className="border-b p-5"><h3 className="font-extrabold">รายชื่อสถานพยาบาล</h3></div>
                 <ul className="divide-y divide-slate-100">
-                  {hospitals.length === 0 ? <li className="p-5 text-sm text-slate-500">ยังไม่มีรายชื่อสถานพยาบาล</li> : hospitals.map((hospital) => (
-                    <li key={hospital.id} className="flex items-center justify-between gap-3 p-4">
-                      <span className="font-semibold">{hospital.name}</span>
-                      <button disabled={busyKey === `hospital-${hospital.id}`} onClick={() => void deleteHospital(hospital)} className="rounded-lg bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50">ลบชื่อ</button>
+                  {filteredHospitals.length === 0 ? <li className="p-5 text-sm text-slate-500">{hospitals.length ? 'ไม่พบสถานพยาบาลที่ตรงกับคำค้นหา' : 'ยังไม่มีรายชื่อสถานพยาบาล'}</li> : filteredHospitals.map((hospital) => (
+                    <li key={hospital.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
+                      <input
+                        aria-label={`ชื่อสถานพยาบาล ${hospital.name}`}
+                        value={hospitalNameEdits[hospital.id] ?? hospital.name}
+                        onChange={(event) => setHospitalNameEdits((current) => ({ ...current, [hospital.id]: event.target.value }))}
+                        className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          disabled={busyKey === `hospital-${hospital.id}` || !(hospitalNameEdits[hospital.id] ?? hospital.name).trim()}
+                          onClick={() => void updateHospital(hospital.id, { name: hospitalNameEdits[hospital.id] ?? hospital.name })}
+                          className="rounded-lg bg-teal-50 px-3 py-2 text-xs font-bold text-teal-700 disabled:opacity-50"
+                        >บันทึกชื่อ</button>
+                        <button
+                          disabled={busyKey === `hospital-${hospital.id}`}
+                          onClick={() => void updateHospital(hospital.id, { isActive: !hospital.isActive })}
+                          className={`rounded-lg px-3 py-2 text-xs font-bold ${hospital.isActive ? 'bg-amber-50 text-amber-800' : 'bg-emerald-50 text-emerald-700'}`}
+                        >{hospital.isActive ? 'ปิดรับจอง' : 'เปิดรับจอง'}</button>
+                        <button disabled={busyKey === `hospital-${hospital.id}`} onClick={() => void deleteHospital(hospital)} className="rounded-lg bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50">ลบชื่อ</button>
+                      </div>
                     </li>
                   ))}
                 </ul>
               </section>
               <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 <h2 className="text-xl font-extrabold">เปิดรอบเวลาและกำหนดความจุ</h2>
-                <p className="mt-1 text-sm text-slate-500">รอบที่สร้างจะถูกใช้จริงในการจอง ระบบไม่สร้างรอบจำลองให้เอง</p>
+                <p className="mt-1 text-sm text-slate-500">ใช้จัดการความจุและรอบบริการเดิม; ผู้ใช้ยังส่งคำขอวันเวลาที่ต้องการได้โดยไม่ต้องมีรอบเปิดล่วงหน้า</p>
                 <form onSubmit={(event) => void saveSlot(event)} className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-6">
-                  <select value={hospitalId} onChange={(event) => setHospitalId(event.target.value)} className="rounded-xl border border-slate-300 bg-white px-3 py-2.5 md:col-span-2"><option value="">เพิ่มสถานพยาบาลใหม่ด้วยชื่อ...</option>{hospitals.map((hospital) => <option key={hospital.id} value={hospital.id}>{hospital.name}</option>)}</select>
+                  <select value={hospitalId} onChange={(event) => setHospitalId(event.target.value)} className="rounded-xl border border-slate-300 bg-white px-3 py-2.5 md:col-span-2"><option value="">เพิ่มสถานพยาบาลใหม่ด้วยชื่อ...</option>{hospitals.filter((hospital) => hospital.isActive).map((hospital) => <option key={hospital.id} value={hospital.id}>{hospital.name}</option>)}</select>
                   {!hospitalId && <input required value={hospitalName} onChange={(event) => setHospitalName(event.target.value)} placeholder="ชื่อโรงพยาบาล/รพ.สต." className="rounded-xl border border-slate-300 px-3 py-2.5 md:col-span-2" />}
                   <input required type="date" value={slotDate} onChange={(event) => setSlotDate(event.target.value)} className="rounded-xl border border-slate-300 px-3 py-2.5" />
                   <input required type="time" value={slotTime} onChange={(event) => setSlotTime(event.target.value)} className="rounded-xl border border-slate-300 px-3 py-2.5" />
@@ -414,7 +526,7 @@ export default function AdminDashboardPage() {
                 <div className="border-b p-5"><h3 className="font-extrabold">รอบเวลาที่บันทึกไว้</h3></div>
                 <div className="overflow-x-auto"><table className="w-full min-w-[700px] text-left text-sm">
                   <thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="p-4">วัน / เวลา</th><th className="p-4">สถานพยาบาล</th><th className="p-4">คิว</th><th className="p-4">สถานะ</th><th className="p-4">จัดการ</th></tr></thead>
-                  <tbody className="divide-y divide-slate-100">{slots.length === 0 ? <tr><td colSpan={5} className="p-10 text-center text-slate-500">ยังไม่มีรอบเวลาในอนาคต</td></tr> : slots.map((slot) => <tr key={slot.id}>
+                  <tbody className="divide-y divide-slate-100">{filteredSlots.length === 0 ? <tr><td colSpan={5} className="p-10 text-center text-slate-500">{slots.length ? 'ไม่พบรอบเวลาที่ตรงกับคำค้นหา' : 'ยังไม่มีรอบเวลาในอนาคต'}</td></tr> : filteredSlots.map((slot) => <tr key={slot.id}>
                     <td className="p-4">{formatSlotDate(slot.date)} · {slot.time}</td><td className="p-4">{slot.hospital.name}</td><td className="p-4">{slot.booked} / {slot.capacity}</td>
                     <td className="p-4"><span className={`rounded-full px-3 py-1 text-xs font-bold ${!slot.isAdminDefined ? 'bg-slate-100 text-slate-600' : slot.isClosed ? 'bg-rose-100 text-rose-700' : slot.booked >= slot.capacity ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>{!slot.isAdminDefined ? 'ยังไม่แสดงผู้ใช้' : slot.isClosed ? 'ปิดรอบ' : slot.booked >= slot.capacity ? 'เต็ม' : 'เปิดรับ'}</span></td>
                     <td className="p-4"><div className="flex gap-2"><button onClick={() => { const value = window.prompt('กำหนดจำนวนคิวทั้งหมด (ต้องไม่น้อยกว่าจำนวนที่จองแล้ว)', String(slot.capacity)); if (value !== null && /^\d+$/.test(value)) void updateSlot(slot.id, { capacity: Number(value) }); }} className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold">แก้ความจุ</button><button onClick={() => void updateSlot(slot.id, { isClosed: !slot.isClosed })} className={`rounded-lg px-3 py-2 text-xs font-bold ${slot.isClosed ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>{slot.isClosed ? 'เปิดรอบ' : 'ปิดฉุกเฉิน'}</button><button onClick={() => void updateSlot(slot.id, { isAdminDefined: !slot.isAdminDefined })} className={`rounded-lg px-3 py-2 text-xs font-bold ${slot.isAdminDefined ? 'bg-slate-100 text-slate-700' : 'bg-teal-50 text-teal-700'}`}>{slot.isAdminDefined ? 'ซ่อนผู้ใช้' : 'แสดงผู้ใช้'}</button></div></td>
@@ -436,7 +548,7 @@ export default function AdminDashboardPage() {
                   <button disabled={busyKey === 'new-vaccine'} className="rounded-xl bg-teal-600 px-4 py-2.5 font-bold text-white sm:col-span-4">เพิ่มวัคซีน</button>
                 </form>
               </section>
-              <section className="grid gap-4 md:grid-cols-2">{vaccines.length === 0 ? <p className="rounded-2xl bg-white p-8 text-center text-slate-500 md:col-span-2">ยังไม่มีข้อมูลวัคซีนในคลัง กรุณาเพิ่มรายการก่อนรับรองการฉีด</p> : vaccines.map((vaccine) => <article key={vaccine.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <section className="grid gap-4 md:grid-cols-2">{filteredVaccines.length === 0 ? <p className="rounded-2xl bg-white p-8 text-center text-slate-500 md:col-span-2">{vaccines.length ? 'ไม่พบวัคซีนที่ตรงกับคำค้นหา' : 'ยังไม่มีข้อมูลวัคซีนในคลัง กรุณาเพิ่มรายการก่อนรับรองการฉีด'}</p> : filteredVaccines.map((vaccine) => <article key={vaccine.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-bold text-teal-700">{vaccine.code}</p><h3 className="mt-1 font-extrabold">{vaccine.name}</h3></div><span className={`rounded-full px-3 py-1 text-xs font-bold ${vaccine.isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{vaccine.isActive ? 'ใช้งาน' : 'ปิดใช้งาน'}</span></div>
                 <p className="mt-3 text-sm text-slate-600">ประวัติที่เชื่อมอยู่ {vaccine._count.records} รายการ</p>
                 <div className="mt-4 flex flex-wrap items-center gap-2"><label className="text-sm">คงเหลือ <input type="number" min={0} value={stockEdits[vaccine.id] ?? vaccine.stock} onChange={(event) => setStockEdits((current) => ({ ...current, [vaccine.id]: Number(event.target.value) }))} className="ml-1 w-24 rounded-lg border border-slate-300 px-2 py-1.5" /> โดส</label><button onClick={() => void updateVaccine(vaccine.id, { stock: stockEdits[vaccine.id] ?? vaccine.stock })} className="rounded-lg bg-teal-50 px-3 py-2 text-xs font-bold text-teal-700">บันทึกสต็อก</button><button onClick={() => void updateVaccine(vaccine.id, { isActive: !vaccine.isActive })} className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold text-slate-700">{vaccine.isActive ? 'ปิดใช้งาน' : 'เปิดใช้งาน'}</button></div>
@@ -449,7 +561,7 @@ export default function AdminDashboardPage() {
               <div className="border-b p-5"><h2 className="text-xl font-extrabold">ตรวจสอบประวัติวัคซีนย้อนหลัง</h2><p className="mt-1 text-sm text-slate-500">รายการที่ผู้ปกครองรายงานจากสมุดวัคซีนจะยังไม่ถือว่าได้รับการยืนยันจนกว่าเจ้าหน้าที่ตรวจสอบ</p></div>
               <div className="overflow-x-auto"><table className="w-full min-w-[850px] text-left text-sm">
                 <thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="p-4">ผู้ปกครอง / เด็ก</th><th className="p-4">วัคซีน</th><th className="p-4">วันที่ฉีดตามสมุด</th><th className="p-4">สถานพยาบาลในสมุด</th><th className="p-4">ผลตรวจ</th></tr></thead>
-                <tbody className="divide-y divide-slate-100">{records.length === 0 ? <tr><td colSpan={5} className="p-10 text-center text-slate-500">ไม่มีประวัติค้างตรวจสอบ</td></tr> : records.map((record) => <tr key={record.id}>
+                <tbody className="divide-y divide-slate-100">{filteredRecords.length === 0 ? <tr><td colSpan={5} className="p-10 text-center text-slate-500">{records.length ? 'ไม่พบประวัติที่ตรงกับคำค้นหา' : 'ไม่มีประวัติค้างตรวจสอบ'}</td></tr> : filteredRecords.map((record) => <tr key={record.id}>
                   <td className="p-4"><p className="font-bold">{childName(record.child)}</p><p className="mt-1 text-xs text-slate-500">{record.user.username} · {record.user.email}</p></td><td className="p-4">{record.vaccineName}<span className="block text-xs text-slate-500">{record.vaccineCode ?? ''}</span></td><td className="whitespace-nowrap p-4">{formatDate(record.administeredDate)}</td><td className="p-4">{record.hospitalName}</td>
                   <td className="p-4"><div className="flex gap-2"><button disabled={busyKey === `record-${record.id}`} onClick={() => void reviewRecord(record.id, 'VERIFIED')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">อนุมัติยืนยัน</button><button disabled={busyKey === `record-${record.id}`} onClick={() => void reviewRecord(record.id, 'REJECTED')} className="rounded-lg bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 disabled:opacity-50">ปฏิเสธ</button></div></td>
                 </tr>)}</tbody>
@@ -468,14 +580,16 @@ export default function AdminDashboardPage() {
               กำลังเลื่อนนัดของ: <strong>{childName(rescheduleTarget.child)}</strong>
             </p>
             <label className="mt-5 block text-sm font-bold text-slate-700">
-              เลือกรอบที่เปิดรับ <span className="text-rose-500">*</span>
-              <select required value={newScheduledAt} onChange={(event) => setNewScheduledAt(event.target.value)} className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all">
-                <option value="">เลือกวันที่และเวลา</option>
-                {rescheduleSlots.map((slot) => (
-                  <option key={slot.id} value={slot.id}>{formatSlotDate(slot.date)} · {slot.time} น. · ว่าง {slot.capacity - slot.booked} คิว</option>
-                ))}
-              </select>
-              {rescheduleSlots.length === 0 && <p className="mt-2 text-xs text-rose-600">ไม่มีรอบว่างของสถานพยาบาลนี้ กรุณาเปิดรอบใหม่ก่อน</p>}
+              วันและเวลาใหม่ <span className="text-rose-500">*</span>
+              <input
+                required
+                type="datetime-local"
+                min={getBangkokDateTimeInput(new Date())}
+                value={newScheduledAt}
+                onChange={(event) => setNewScheduledAt(event.target.value)}
+                className="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition-all focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200"
+              />
+              <span className="mt-2 block text-xs font-normal text-slate-500">กำหนดวันและเวลาได้โดยตรง ไม่จำเป็นต้องสร้างรอบคิวล่วงหน้า</span>
             </label>
             <div className="mt-6 flex justify-end gap-3 border-t border-slate-100 pt-4">
               <button 
@@ -490,7 +604,7 @@ export default function AdminDashboardPage() {
                 disabled={busyKey === `reschedule-${rescheduleTarget.id}`} 
                 className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-50 transition shadow-sm"
               >
-                {busyKey === `reschedule-${rescheduleTarget.id}` ? 'กำลังดำเนินการ...' : 'กำหนดวันและส่งอีเมล'}
+                {busyKey === `reschedule-${rescheduleTarget.id}` ? 'กำลังดำเนินการ...' : 'กำหนดวันและแจ้งผู้ปกครอง'}
               </button>
             </div>
           </form>

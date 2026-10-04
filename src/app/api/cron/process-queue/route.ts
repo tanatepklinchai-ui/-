@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { sendEmail } from '@/lib/mailer'; // 👈 1. เปลี่ยนมานำเข้า sendEmail ของเรา
 import { isExpiredWebPushError, isWebPushConfigured, sendWebPushNotification } from '@/lib/webPush';
+import { getPublicAppUrl } from '@/lib/appointmentNotifications';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,6 +60,7 @@ async function promoteWaitlistedAppointment(transaction: Prisma.TransactionClien
     data: {
       status: 'CONFIRMED',
       isWaitlisted: false,
+      usesCapacity: true,
       notified7Days: false,
       notified3Days: false,
       notified1Day: false,
@@ -95,14 +97,16 @@ async function sendAppointmentReminders(now: Date) {
       },
       include: { user: { include: { pushSubscriptions: true } } },
     });
+    let notifiedCount = 0;
 
     for (const appointment of appointments) {
       const targetEmail = appointment.user.notificationEmail || appointment.user.email;
+      const appUrl = getPublicAppUrl();
       let delivered = false;
 
-      if (targetEmail) {
+      if (targetEmail && appUrl) {
         try {
-          await sendEmail({
+          const emailDelivered = await sendEmail({
             to: targetEmail,
             subject: reminder.title,
             html: `<div style="font-family: sans-serif; padding: 20px;">
@@ -114,9 +118,10 @@ async function sendAppointmentReminders(now: Date) {
                 <p>🗓️ <strong>วัน-เวลา:</strong> ${new Date(appointment.scheduledAt).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })} น.</p>
               </div>
               <p style="color: #64748b; font-size: 13px;">กรุณาเตรียมสมุดวัคซีนและเดินทางไปถึงก่อนเวลานัดหมาย 15 นาที</p>
+              <p><a href="${appUrl}/user/dashboard?tab=appointments">ดูหรือจัดการนัดหมาย</a></p>
             </div>`,
           });
-          delivered = true;
+          delivered = emailDelivered;
         } catch (error) {
           console.error(`Failed to send ${reminder.days}-day appointment email reminder:`, error);
         }
@@ -128,7 +133,7 @@ async function sendAppointmentReminders(now: Date) {
             await sendWebPushNotification(subscription, {
               title: reminder.title,
               body: `คุณมีนัดรับวัคซีนในอีก ${reminder.days} วัน`,
-              url: '/user/appointment',
+              url: '/user/dashboard?tab=appointments',
             });
             delivered = true;
           } catch (error) {
@@ -149,12 +154,13 @@ async function sendAppointmentReminders(now: Date) {
           where: { id: appointment.id },
           data: { [reminder.flag]: true },
         });
+        notifiedCount += 1;
       }
     }
 
-    if (reminder.days === 7) counts.notified7DaysCount = appointments.length;
-    if (reminder.days === 3) counts.notified3DaysCount = appointments.length;
-    if (reminder.days === 1) counts.notified1DayCount = appointments.length;
+    if (reminder.days === 7) counts.notified7DaysCount = notifiedCount;
+    if (reminder.days === 3) counts.notified3DaysCount = notifiedCount;
+    if (reminder.days === 1) counts.notified1DayCount = notifiedCount;
   }
 
   return counts;
@@ -183,7 +189,7 @@ export async function GET(req: Request) {
           data: { status: 'EXPIRED' },
         });
         if (result.count !== 1) return false;
-        if (appointment.hospitalId && !appointment.isWaitlisted) {
+        if (appointment.hospitalId && appointment.usesCapacity && !appointment.isWaitlisted) {
           const timeParts = new Intl.DateTimeFormat('en', {
             timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit',
             hour: '2-digit', minute: '2-digit', hourCycle: 'h23',

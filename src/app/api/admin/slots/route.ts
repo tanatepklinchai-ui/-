@@ -30,7 +30,7 @@ export async function GET() {
   if (!(await isAdmin())) return NextResponse.json({ error: 'ไม่มีสิทธิ์เข้าถึงข้อมูลนี้' }, { status: 403 });
   try {
     const [hospitals, slots] = await Promise.all([
-      prisma.hospital.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true } }),
+      prisma.hospital.findMany({ orderBy: { name: 'asc' }, select: { id: true, name: true, isActive: true } }),
       prisma.hospitalSlot.findMany({
         where: { date: { gte: getBangkokToday() } },
         include: { hospital: { select: { id: true, name: true } } },

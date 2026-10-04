@@ -83,6 +83,7 @@ model Hospital {
   address      String? // ที่อยู่
   latitude     Float? // พิกัดละติจูด (สำหรับคำนวณ GPS)
   longitude    Float? // พิกัดลองจิจูด (สำหรับคำนวณ GPS)
+  isActive     Boolean        @default(true)
   slots        HospitalSlot[] // เชื่อมกับตารางเวลาคิวว่าง
   appointments Appointment[] // เชื่อมกับประวัติการจองของ User
   createdAt    DateTime       @default(now())
@@ -125,6 +126,7 @@ model Appointment {
   notified1Hour Boolean  @default(false)
   status        String    @default("PENDING") // PENDING, CONFIRMED, COMPLETED, CANCELLED, EXPIRED, RESCHEDULED
   isWaitlisted  Boolean   @default(false)
+  usesCapacity  Boolean   @default(false)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 }

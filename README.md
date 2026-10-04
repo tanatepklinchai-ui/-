@@ -27,6 +27,7 @@ NEXTAUTH_URL="http://localhost:3000"
 ADMIN_EMAIL="authorized-admin@example.com"
 ADMIN_REGISTRATION_CODE="a-private-admin-registration-code"
 RESEND_API_KEY="your-resend-api-key"
+EMAIL_FROM="PromChid <verified-sender@example.com>"
 CRON_SECRET="a-long-random-cron-secret"
 VAPID_SUBJECT="mailto:admin@example.com"
 VAPID_PUBLIC_KEY="your-vapid-public-key"
@@ -37,7 +38,11 @@ Keep secret values out of source control. Admin registration only grants the `AD
 
 Generate a VAPID key pair for Web Push with `npx web-push generate-vapid-keys` and configure all three VAPID values locally and in production. Web Push requires HTTPS in production; localhost is supported for local development. Apply the Web Push subscription migration with `npx prisma migrate deploy` before deploying the app. Existing databases were baselined at `20260927000000_init`; later schema changes should be added as new Prisma migrations.
 
-Configure the same `CRON_SECRET` in the production deployment environment. Vercel runs `/api/cron/process-queue` from `vercel.json` once per day at 00:00 UTC (07:00 Thailand time); scheduled reminders will not run unless the project is deployed to Vercel production and its cron authorization secret is configured.
+Email notifications use Resend when `RESEND_API_KEY` is configured; set `EMAIL_FROM` to a sender verified with Resend. Gmail can be used instead by setting both `GMAIL_USER` and `GMAIL_APP_PASSWORD`. Users can enable browser notifications in **ตั้งค่าการแจ้งเตือน**; admins can send an appointment notification from the appointment list, and rescheduling sends an update automatically. Set `NEXTAUTH_URL` to the public application URL in production so email links open the correct site.
+
+Users choose their preferred date and time when requesting an appointment. Requests wait for admin approval and do not require an admin-created availability slot. Admin-managed slots remain available for capacity tracking and waitlist operations.
+
+Configure the same `CRON_SECRET` in the production deployment environment. Vercel runs `/api/cron/process-queue` from `vercel.json` once per day at 16:00 UTC (23:00 Thailand time) so appointment reminders are processed late on each reminder date. Scheduled reminders will not run unless the project is deployed to Vercel production and its cron authorization secret is configured.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 

@@ -82,6 +82,7 @@ async function promoteWaitlistedAppointment(transaction: Prisma.TransactionClien
     data: {
       status: 'CONFIRMED',
       isWaitlisted: false,
+      usesCapacity: true,
       notified7Days: false,
       notified3Days: false,
       notified1Day: false,
@@ -151,7 +152,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'ข้อมูลนัดหมายไม่ถูกต้อง' }, { status: 400 });
     }
 
-    const { date, time } = getBangkokSlot(appointmentDate);
     const appointment = await prisma.$transaction(async (transaction) => {
       const child = await transaction.child.findFirst({
         where: { id: childId, userId: session.userId },
@@ -163,45 +163,15 @@ export async function POST(req: Request) {
 
       const hospital = await transaction.hospital.findUnique({
         where: { id: hospitalId },
-        select: { id: true, name: true },
+        select: { id: true, name: true, isActive: true },
       });
-      if (!hospital) {
-        throw new AppointmentRequestError('ไม่พบสถานพยาบาลที่เลือก', 404);
+      if (!hospital || !hospital.isActive) {
+        throw new AppointmentRequestError('สถานพยาบาลนี้ไม่เปิดให้จองในขณะนี้', 404);
       }
 
-      const slot = await transaction.hospitalSlot.findUnique({
-        where: { hospitalId_date_time: { hospitalId, date, time } },
-      });
-      if (!slot || !slot.isAdminDefined) {
-        throw new AppointmentRequestError('ช่วงเวลานี้ไม่ได้เปิดให้จองแล้ว', 409);
-      }
-      if (slot.isClosed) {
-        throw new AppointmentRequestError('รอบเวลานี้ปิดรับจองแล้ว', 409);
-      }
-
-      const reservation = await transaction.hospitalSlot.updateMany({
-        where: { id: slot.id, isClosed: false, booked: { lt: slot.capacity } },
-        data: { booked: { increment: 1 } },
-      });
-      let seatReserved = reservation.count === 1;
-      let status = 'CONFIRMED';
-      let isWaitlisted = false;
-      if (!seatReserved) {
-        const latestSlot = await transaction.hospitalSlot.findUnique({ where: { id: slot.id } });
-        if (!latestSlot || latestSlot.isClosed) {
-          throw new AppointmentRequestError('รอบเวลานี้ปิดรับจองแล้ว', 409);
-        }
-        if (latestSlot.booked < latestSlot.capacity) {
-          const retryReservation = await transaction.hospitalSlot.updateMany({
-            where: { id: slot.id, isClosed: false, booked: { lt: latestSlot.capacity } },
-            data: { booked: { increment: 1 } },
-          });
-          seatReserved = retryReservation.count === 1;
-        }
-        if (!seatReserved) {
-          status = 'PENDING';
-          isWaitlisted = true;
-        }
+      if (requestedVaccine !== undefined && requestedVaccine !== null &&
+          (typeof requestedVaccine !== 'string' || requestedVaccine.length > 200)) {
+        throw new AppointmentRequestError('ชื่อวัคซีนไม่ถูกต้อง', 400);
       }
 
       return transaction.appointment.create({
@@ -211,15 +181,16 @@ export async function POST(req: Request) {
           hospitalId: hospital.id,
           hospitalName: hospital.name,
           scheduledAt: appointmentDate,
-          status,
-          isWaitlisted,
+          status: 'PENDING',
+          isWaitlisted: false,
+          usesCapacity: false,
           requestedVaccine,
         },
         include: appointmentInclude(),
       });
     });
 
-    return NextResponse.json({ success: true, appointment, waitlisted: appointment.isWaitlisted }, { status: appointment.isWaitlisted ? 202 : 201 });
+    return NextResponse.json({ success: true, appointment, waitlisted: false }, { status: 201 });
   } catch (error) {
     if (error instanceof AppointmentRequestError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
@@ -266,7 +237,7 @@ export async function PATCH(req: Request) {
       }
 
       if (status === 'CANCELLED') {
-        if (currentAppointment.hospitalId && !currentAppointment.isWaitlisted) {
+        if (currentAppointment.hospitalId && currentAppointment.usesCapacity && !currentAppointment.isWaitlisted) {
           const currentSlot = getBangkokSlot(currentAppointment.scheduledAt);
           await transaction.hospitalSlot.updateMany({
             where: {
