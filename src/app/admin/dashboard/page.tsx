@@ -4,8 +4,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { VACCINE_SCHEDULE } from '@/lib/vaccineSchedule';
+import HospitalLocationPicker from '@/components/HospitalLocationPicker';
 
-type Tab = 'appointments' | 'appointmentHistory' | 'slots' | 'vaccines' | 'records' | 'users';
+type Tab = 'appointments' | 'appointmentHistory' | 'hospitals' | 'slots' | 'vaccines' | 'records' | 'users';
 type ManagedUser = {
   id: string;
   email: string;
@@ -92,6 +93,7 @@ type PendingRecord = {
 const tabs: { id: Tab; label: string }[] = [
   { id: 'appointments', label: 'จัดการคิว' },
   { id: 'appointmentHistory', label: 'ประวัติการจอง' },
+  { id: 'hospitals', label: 'จัดการสถานพยาบาล' },
   { id: 'slots', label: 'รอบเวลา' },
   { id: 'vaccines', label: 'สต็อกวัคซีน' },
   { id: 'records', label: 'ตรวจประวัติ' },
@@ -721,7 +723,7 @@ export default function AdminDashboardPage() {
             </section>
           )}
 
-          {activeTab === 'slots' && (
+          {activeTab === 'hospitals' && (
             <div className="space-y-6">
               <section className="overflow-hidden rounded-2xl border-2 border-teal-200 bg-white shadow-sm">
                 <div className="border-b border-teal-100 bg-teal-50 px-5 py-4">
@@ -738,16 +740,41 @@ export default function AdminDashboardPage() {
                     ที่อยู่ (ไม่บังคับ)
                     <input maxLength={500} value={newHospitalAddress} onChange={(event) => setNewHospitalAddress(event.target.value)} placeholder="ตำบล / อำเภอ / จังหวัด" className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal" />
                   </label>
-                  <label className="text-xs font-semibold text-slate-700">
-                    ละติจูด (ไม่บังคับ)
-                    <input type="number" step="any" min={-90} max={90} value={newHospitalLatitude} onChange={(event) => setNewHospitalLatitude(event.target.value)} placeholder="เช่น 15.1389" className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal" />
-                  </label>
-                  <label className="text-xs font-semibold text-slate-700">
-                    ลองจิจูด (ไม่บังคับ)
-                    <input type="number" step="any" min={-180} max={180} value={newHospitalLongitude} onChange={(event) => setNewHospitalLongitude(event.target.value)} placeholder="เช่น 100.2755" className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal" />
-                  </label>
-                  <p className="text-xs text-slate-500 sm:col-span-2 lg:col-span-4">ใส่พิกัดทั้งสองช่องเพื่อให้ผู้ใช้ค้นหาสถานพยาบาลนี้จากตำแหน่ง GPS ได้ หากยังไม่มีพิกัด ผู้ใช้ยังค้นหาจากชื่อได้</p>
-                  <div className="flex items-end lg:col-span-2">
+                  <div className="sm:col-span-2 lg:col-span-6">
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="text-xs font-semibold text-slate-700">ปักหมุดตำแหน่งสถานพยาบาล (ไม่บังคับ)</p>
+                        <p className="mt-1 text-xs text-slate-500">คลิกบนแผนที่เพื่อวางหมุด หรือลากหมุดเพื่อปรับตำแหน่ง</p>
+                      </div>
+                      {newHospitalLatitude && newHospitalLongitude && (
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs text-teal-800">
+                            {Number(newHospitalLatitude).toFixed(5)}, {Number(newHospitalLongitude).toFixed(5)}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNewHospitalLatitude('');
+                              setNewHospitalLongitude('');
+                            }}
+                            className="text-xs font-semibold text-rose-700 hover:underline"
+                          >
+                            ล้างหมุด
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    <HospitalLocationPicker
+                      latitude={newHospitalLatitude ? Number(newHospitalLatitude) : null}
+                      longitude={newHospitalLongitude ? Number(newHospitalLongitude) : null}
+                      onChange={(latitude, longitude) => {
+                        setNewHospitalLatitude(latitude.toFixed(6));
+                        setNewHospitalLongitude(longitude.toFixed(6));
+                      }}
+                    />
+                    <p className="mt-2 text-xs text-slate-500">หากไม่ปักหมุด ผู้ใช้ยังค้นหาสถานพยาบาลนี้จากชื่อได้ แต่จะไม่ปรากฏในผลค้นหาใกล้เคียงด้วย GPS</p>
+                  </div>
+                  <div className="flex items-end sm:col-span-2 lg:col-span-6">
                     <button disabled={busyKey === 'new-hospital'} className="w-full rounded-lg bg-teal-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-teal-800 disabled:opacity-50">
                       {busyKey === 'new-hospital' ? 'กำลังบันทึก...' : '＋ เพิ่มสถานพยาบาล'}
                     </button>
@@ -779,7 +806,11 @@ export default function AdminDashboardPage() {
                   ))}
                 </ul>
               </section>
+            </div>
+          )}
 
+          {activeTab === 'slots' && (
+            <div className="space-y-6">
               <section className="rounded-2xl border border-teal-100 bg-white p-5 shadow-sm sm:p-6">
                 <div className="max-w-2xl">
                   <p className="text-xs font-bold uppercase tracking-wide text-teal-700">ขั้นตอนที่ 1</p>
