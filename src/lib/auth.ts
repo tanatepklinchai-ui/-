@@ -1,6 +1,7 @@
 // src/lib/auth.ts
 import { cookies } from 'next/headers';
 import crypto from 'crypto';
+import { prisma } from '@/lib/prisma';
 
 const SECRET = process.env.NEXTAUTH_SECRET;
 
@@ -50,6 +51,17 @@ export async function getSession(): Promise<{ userId: string; role: string; emai
   } catch {
     return null;
   }
+}
+
+export async function getAdminSession() {
+  const session = await getSession();
+  if (!session || session.role !== 'ADMIN') return null;
+
+  const user = await prisma.user.findUnique({
+    where: { id: session.userId },
+    select: { role: true },
+  });
+  return user?.role === 'ADMIN' ? session : null;
 }
 
 // 3. สั่งลบ Cookie เมื่อกดออกจากระบบ

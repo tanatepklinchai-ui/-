@@ -2,7 +2,7 @@
 import { Prisma } from '@prisma/client';
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/auth';
+import { getAdminSession } from '@/lib/auth';
 import { notifyAppointmentUpdate } from '@/lib/appointmentNotifications';
 
 class RequestError extends Error {
@@ -71,8 +71,8 @@ async function promoteWaitlistedAppointment(transaction: Prisma.TransactionClien
 }
 
 export async function GET() {
-  const session = await getSession();
-  if (!session || session.role !== 'ADMIN') return NextResponse.json({ error: 'ไม่มีสิทธิ์เข้าถึงข้อมูลนี้' }, { status: 403 });
+  const session = await getAdminSession();
+  if (!session) return NextResponse.json({ error: 'ไม่มีสิทธิ์เข้าถึงข้อมูลนี้' }, { status: 403 });
   try {
     const appointments = await prisma.appointment.findMany({
       include: {
@@ -89,8 +89,8 @@ export async function GET() {
 }
 
 export async function PATCH(req: Request) {
-  const session = await getSession();
-  if (!session || session.role !== 'ADMIN') return NextResponse.json({ error: 'ไม่มีสิทธิ์ดำเนินการนี้' }, { status: 403 });
+  const session = await getAdminSession();
+  if (!session) return NextResponse.json({ error: 'ไม่มีสิทธิ์ดำเนินการนี้' }, { status: 403 });
   
   try {
     const body = await req.json();

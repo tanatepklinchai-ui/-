@@ -36,6 +36,8 @@ VAPID_PRIVATE_KEY="your-vapid-private-key"
 
 Keep secret values out of source control. Admin registration only grants the `ADMIN` role when both the email and registration code match the server-side environment values. Admin APIs also verify the signed session and role.
 
+Admins can promote or demote accounts from the **จัดการผู้ใช้งาน** tab in the admin dashboard. The system prevents demoting the account currently in use or removing the last administrator. A newly promoted user must sign out and sign in again to receive an admin session.
+
 Generate a VAPID key pair for Web Push with `npx web-push generate-vapid-keys` and configure all three VAPID values locally and in production. Web Push requires HTTPS in production; localhost is supported for local development. Apply the Web Push subscription migration with `npx prisma migrate deploy` before deploying the app. Existing databases were baselined at `20260927000000_init`; later schema changes should be added as new Prisma migrations.
 
 Email notifications use Resend when `RESEND_API_KEY` is configured; set `EMAIL_FROM` to a sender verified with Resend. Gmail can be used instead by setting both `GMAIL_USER` and `GMAIL_APP_PASSWORD`. Users can enable browser notifications in **ตั้งค่าการแจ้งเตือน**; admins can send an appointment notification from the appointment list, and rescheduling sends an update automatically. Set `NEXTAUTH_URL` to the public application URL in production so email links open the correct site.

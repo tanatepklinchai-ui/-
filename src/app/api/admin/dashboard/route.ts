@@ -1,12 +1,12 @@
 // src/app/api/admin/dashboard/route.ts
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/auth';
+import { getAdminSession } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 export async function GET() {
-  const session = await getSession();
-  if (!session || session.role !== 'ADMIN') {
+  const session = await getAdminSession();
+  if (!session) {
     return NextResponse.json({ error: 'ไม่มีสิทธิ์เข้าถึงข้อมูลนี้' }, { status: 403 });
   }
 

@@ -4,7 +4,14 @@ import { useCallback, useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 
-type Tab = 'appointments' | 'slots' | 'vaccines' | 'records';
+type Tab = 'appointments' | 'slots' | 'vaccines' | 'records' | 'users';
+type ManagedUser = {
+  id: string;
+  email: string;
+  username: string;
+  role: 'USER' | 'ADMIN';
+  createdAt: string;
+};
 type Appointment = {
   id: string;
   hospitalName: string;
@@ -44,6 +51,7 @@ const tabs: { id: Tab; label: string }[] = [
   { id: 'slots', label: 'รอบเวลา' },
   { id: 'vaccines', label: 'สต็อกวัคซีน' },
   { id: 'records', label: 'ตรวจประวัติ' },
+  { id: 'users', label: 'จัดการผู้ใช้งาน' },
 ];
 
 async function readJson<T>(response: Response): Promise<T> {
@@ -90,6 +98,11 @@ export default function AdminDashboardPage() {
   const [slots, setSlots] = useState<HospitalSlot[]>([]);
   const [vaccines, setVaccines] = useState<Vaccine[]>([]);
   const [records, setRecords] = useState<PendingRecord[]>([]);
+  const [users, setUsers] = useState<ManagedUser[]>([]);
+  const [usersNextCursor, setUsersNextCursor] = useState<string | null>(null);
+  const [usersCurrentCursor, setUsersCurrentCursor] = useState<string | null>(null);
+  const [usersPreviousCursors, setUsersPreviousCursors] = useState<(string | null)[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
   const [selectedVaccines, setSelectedVaccines] = useState<Record<string, string>>({});
   const [hospitalId, setHospitalId] = useState('');
   const [hospitalName, setHospitalName] = useState('');
@@ -171,6 +184,41 @@ export default function AdminDashboardPage() {
     return () => { isMounted = false; };
   }, []);
 
+  const loadUsers = useCallback(async (cursor: string | null, signal?: AbortSignal) => {
+    setUsersLoading(true);
+    const params = new URLSearchParams();
+    if (searchTerm.trim()) params.set('q', searchTerm.trim());
+    if (cursor) params.set('cursor', cursor);
+    try {
+      const response = await fetch(`/api/admin/users?${params}`, {
+        cache: 'no-store',
+        ...(signal ? { signal } : {}),
+      });
+      const data = await readJson<{ users: ManagedUser[]; nextCursor: string | null }>(response);
+      setUsers(data.users);
+      setUsersNextCursor(data.nextCursor);
+      setUsersCurrentCursor(cursor);
+    } catch (caught) {
+      if (!signal?.aborted) {
+        setError(caught instanceof Error ? caught.message : 'ไม่สามารถโหลดรายชื่อผู้ใช้ได้');
+      }
+    } finally {
+      if (!signal?.aborted) setUsersLoading(false);
+    }
+  }, [searchTerm]);
+
+  useEffect(() => {
+    if (activeTab !== 'users') return;
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => {
+      void loadUsers(null, controller.signal);
+    }, 0);
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [activeTab, loadUsers]);
+
   async function performAction(
     key: string,
     action: () => Promise<string | { message: string; warning?: boolean } | void>,
@@ -251,6 +299,23 @@ export default function AdminDashboardPage() {
         ? 'ส่งอีเมลแจ้งเตือนแล้ว (ผู้ใช้ยังไม่ได้เปิด Push)'
         : { message: 'ส่งแจ้งเตือนบนเว็บแล้ว แต่อีเมลส่งไม่สำเร็จ', warning: true };
     }, 'ส่งแจ้งเตือนแล้ว');
+  }
+
+  async function updateUserRole(user: ManagedUser, role: ManagedUser['role']) {
+    const action = role === 'ADMIN' ? 'ให้สิทธิ์แอดมินแก่' : 'ลดสิทธิ์เป็นผู้ใช้ทั่วไปของ';
+    if (!window.confirm(`ยืนยัน${action} ${user.username} (${user.email}) หรือไม่?`)) return;
+    await performAction(`user-${user.id}`, async () => {
+      const response = await fetch('/api/admin/users', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, role }),
+      });
+      await readJson(response);
+      setUsers((current) => current.map((item) => item.id === user.id ? { ...item, role } : item));
+      return role === 'ADMIN'
+        ? 'เปลี่ยนสิทธิ์เป็นแอดมินแล้ว ผู้ใช้ต้องออกจากระบบและเข้าสู่ระบบใหม่เพื่อรับสิทธิ์'
+        : 'เปลี่ยนสิทธิ์เป็นผู้ใช้ทั่วไปแล้ว';
+    }, 'บันทึกสิทธิ์ผู้ใช้แล้ว');
   }
 
   async function deleteHospital(hospital: Hospital) {
@@ -375,7 +440,7 @@ export default function AdminDashboardPage() {
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-6 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <div>
             <p className="text-sm font-semibold text-teal-300">พร้อมฉีด · ADMIN</p>
-            <h1 className="mt-1 text-2xl font-extrabold">ระบบจัดการสถานพยาบาล</h1>
+            <h1 className="mt-1 text-2xl font-extrabold">ระบบจัดการวัคซีนและผู้ใช้งาน</h1>
           </div>
           <button onClick={() => void logout()} className="text-sm font-semibold text-rose-300 hover:text-rose-200">ออกจากระบบ</button>
         </div>
@@ -384,7 +449,10 @@ export default function AdminDashboardPage() {
       <div className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6">
         <nav className="flex flex-wrap gap-2 rounded-2xl bg-white p-2 shadow-sm" aria-label="เมนูแอดมิน">
           {tabs.map((tab) => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`rounded-xl px-4 py-2.5 text-sm font-bold transition ${activeTab === tab.id ? 'bg-teal-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
+            <button key={tab.id} onClick={() => {
+              if (tab.id === 'users') setUsersPreviousCursors([]);
+              setActiveTab(tab.id);
+            }} className={`rounded-xl px-4 py-2.5 text-sm font-bold transition ${activeTab === tab.id ? 'bg-teal-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
               {tab.label}{tab.id === 'records' && records.length > 0 ? ` (${records.length})` : ''}
             </button>
           ))}
@@ -393,7 +461,10 @@ export default function AdminDashboardPage() {
             <input
               type="search"
               value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
+              onChange={(event) => {
+                setUsersPreviousCursors([]);
+                setSearchTerm(event.target.value);
+              }}
               placeholder="ค้นหาโรงพยาบาล วัคซีน ผู้ใช้ หรือการจอง"
               aria-label="ค้นหาโรงพยาบาล วัคซีน ผู้ใช้ หรือการจอง"
               className="min-w-0 flex-1 outline-none"
@@ -566,6 +637,74 @@ export default function AdminDashboardPage() {
                   <td className="p-4"><div className="flex gap-2"><button disabled={busyKey === `record-${record.id}`} onClick={() => void reviewRecord(record.id, 'VERIFIED')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white disabled:opacity-50">อนุมัติยืนยัน</button><button disabled={busyKey === `record-${record.id}`} onClick={() => void reviewRecord(record.id, 'REJECTED')} className="rounded-lg bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 disabled:opacity-50">ปฏิเสธ</button></div></td>
                 </tr>)}</tbody>
               </table></div>
+            </section>
+          )}
+
+          {activeTab === 'users' && (
+            <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <div className="border-b p-5">
+                <h2 className="text-xl font-extrabold">จัดการผู้ใช้งาน</h2>
+                <p className="mt-1 text-sm text-slate-500">เปลี่ยนสิทธิ์บัญชีผู้ใช้ได้โดยตรง ระบบจะป้องกันการลดสิทธิ์แอดมินบัญชีสุดท้าย</p>
+              </div>
+              {usersLoading ? (
+                <p className="p-10 text-center text-sm text-slate-500">กำลังโหลดรายชื่อผู้ใช้...</p>
+              ) : (
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[720px] text-left text-sm">
+                      <thead className="bg-slate-50 text-xs text-slate-500">
+                        <tr><th className="p-4">ชื่อผู้ใช้</th><th className="p-4">อีเมล</th><th className="p-4">สมัครเมื่อ</th><th className="p-4">สิทธิ์</th><th className="p-4">จัดการสิทธิ์</th></tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {users.length === 0 ? (
+                          <tr><td colSpan={5} className="p-10 text-center text-slate-500">ไม่พบผู้ใช้ที่ตรงกับคำค้นหา</td></tr>
+                        ) : users.map((user) => (
+                          <tr key={user.id}>
+                            <td className="p-4 font-semibold">{user.username}</td>
+                            <td className="p-4">{user.email}</td>
+                            <td className="whitespace-nowrap p-4">{formatDate(user.createdAt)}</td>
+                            <td className="p-4">
+                              <span className={`rounded-full px-3 py-1 text-xs font-bold ${user.role === 'ADMIN' ? 'bg-indigo-100 text-indigo-800' : 'bg-slate-100 text-slate-700'}`}>
+                                {user.role === 'ADMIN' ? 'แอดมิน' : 'ผู้ใช้'}
+                              </span>
+                            </td>
+                            <td className="p-4">
+                              <button
+                                disabled={busyKey === `user-${user.id}`}
+                                onClick={() => void updateUserRole(user, user.role === 'ADMIN' ? 'USER' : 'ADMIN')}
+                                className={`rounded-lg px-3 py-2 text-xs font-bold disabled:opacity-50 ${user.role === 'ADMIN' ? 'bg-amber-50 text-amber-800 hover:bg-amber-100' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
+                              >
+                                {busyKey === `user-${user.id}` ? 'กำลังบันทึก...' : user.role === 'ADMIN' ? 'ลดสิทธิ์เป็นผู้ใช้' : 'กำหนดเป็นแอดมิน'}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="flex items-center justify-between border-t p-4">
+                    <button
+                      disabled={usersPreviousCursors.length === 0 || usersLoading}
+                      onClick={() => {
+                        const previousCursors = [...usersPreviousCursors];
+                        const cursor = previousCursors.pop() ?? null;
+                        setUsersPreviousCursors(previousCursors);
+                        void loadUsers(cursor);
+                      }}
+                      className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold disabled:opacity-40"
+                    >ก่อนหน้า</button>
+                    <span className="text-xs text-slate-500">{users.length} รายการในหน้านี้</span>
+                    <button
+                      disabled={!usersNextCursor || usersLoading}
+                      onClick={() => {
+                        setUsersPreviousCursors((current) => [...current, usersCurrentCursor]);
+                        if (usersNextCursor) void loadUsers(usersNextCursor);
+                      }}
+                      className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold disabled:opacity-40"
+                    >ถัดไป</button>
+                  </div>
+                </>
+              )}
             </section>
           )}
         </>}

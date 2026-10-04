@@ -1,12 +1,11 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/auth';
+import { getAdminSession } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
 async function isAdmin() {
-  const session = await getSession();
-  return session?.role === 'ADMIN';
+  return Boolean(await getAdminSession());
 }
 
 function parseDateOnly(value: unknown) {

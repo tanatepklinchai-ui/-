@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
-import { getSession } from '@/lib/auth';
+import { getAdminSession } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
 
 export async function PATCH(req: Request) {
-  const session = await getSession();
-  if (!session || session.role !== 'ADMIN') {
+  const session = await getAdminSession();
+  if (!session) {
     return NextResponse.json({ error: 'ไม่มีสิทธิ์ดำเนินการนี้' }, { status: 403 });
   }
 

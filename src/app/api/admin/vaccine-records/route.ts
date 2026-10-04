@@ -1,13 +1,11 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getSession } from '@/lib/auth';
+import { getAdminSession } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
 async function requireAdmin() {
-  const session = await getSession();
-  if (!session || session.role !== 'ADMIN') return null;
-  return session;
+  return getAdminSession();
 }
 
 export async function GET() {
