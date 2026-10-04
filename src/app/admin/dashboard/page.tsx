@@ -1,16 +1,52 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
+import { VACCINE_SCHEDULE } from '@/lib/vaccineSchedule';
 
-type Tab = 'appointments' | 'slots' | 'vaccines' | 'records' | 'users';
+type Tab = 'appointments' | 'appointmentHistory' | 'slots' | 'vaccines' | 'records' | 'users';
 type ManagedUser = {
   id: string;
   email: string;
   username: string;
   role: 'USER' | 'ADMIN';
   createdAt: string;
+};
+type UserProfileDetail = ManagedUser & {
+  profile: {
+    firstName: string | null;
+    lastName: string | null;
+    gender: string | null;
+    dob: string | null;
+    weight: number | null;
+    height: number | null;
+  } | null;
+  children: {
+    id: string;
+    firstName: string | null;
+    lastName: string | null;
+    gender: string | null;
+    dob: string | null;
+    weight: number | null;
+    height: number | null;
+    vaccineRecords: {
+      id: string;
+      vaccineCode: string | null;
+      vaccineName: string;
+      administeredDate: string;
+      hospitalName: string;
+      verificationStatus: string;
+    }[];
+  }[];
+  appointments: {
+    id: string;
+    hospitalName: string;
+    scheduledAt: string;
+    requestedVaccine: string | null;
+    status: string;
+    child: { firstName: string | null; lastName: string | null };
+  }[];
 };
 type Appointment = {
   id: string;
@@ -48,6 +84,7 @@ type PendingRecord = {
 
 const tabs: { id: Tab; label: string }[] = [
   { id: 'appointments', label: 'จัดการคิว' },
+  { id: 'appointmentHistory', label: 'ประวัติการจอง' },
   { id: 'slots', label: 'รอบเวลา' },
   { id: 'vaccines', label: 'สต็อกวัคซีน' },
   { id: 'records', label: 'ตรวจประวัติ' },
@@ -103,6 +140,11 @@ export default function AdminDashboardPage() {
   const [usersCurrentCursor, setUsersCurrentCursor] = useState<string | null>(null);
   const [usersPreviousCursors, setUsersPreviousCursors] = useState<(string | null)[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
+  const [profileTarget, setProfileTarget] = useState<ManagedUser | null>(null);
+  const [profileDetail, setProfileDetail] = useState<UserProfileDetail | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
+  const isLoadingData = useRef(false);
   const [selectedVaccines, setSelectedVaccines] = useState<Record<string, string>>({});
   const [hospitalId, setHospitalId] = useState('');
   const [hospitalName, setHospitalName] = useState('');
@@ -126,6 +168,8 @@ export default function AdminDashboardPage() {
   const [newScheduledAt, setNewScheduledAt] = useState('');
 
   const loadData = useCallback(async () => {
+    if (isLoadingData.current) return;
+    isLoadingData.current = true;
     try {
       const [appointmentResponse, slotResponse, vaccineResponse, recordResponse] = await Promise.all([
         fetch('/api/admin/appointments', { cache: 'no-store' }),
@@ -145,9 +189,11 @@ export default function AdminDashboardPage() {
       setVaccines(vaccineData.vaccines);
       setRecords(recordData.records);
       setError('');
+      setLastRefreshedAt(new Date());
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'ไม่สามารถโหลดข้อมูลหลังบ้านได้');
     } finally {
+      isLoadingData.current = false;
       setIsLoading(false);
     }
   }, []);
@@ -174,6 +220,7 @@ export default function AdminDashboardPage() {
         setSlots(slotData.slots);
         setVaccines(vaccineData.vaccines);
         setRecords(recordData.records);
+        setLastRefreshedAt(new Date());
       } catch (caught) {
         if (isMounted) setError(caught instanceof Error ? caught.message : 'ไม่สามารถโหลดข้อมูลหลังบ้านได้');
       } finally {
@@ -183,6 +230,14 @@ export default function AdminDashboardPage() {
     void loadInitialData();
     return () => { isMounted = false; };
   }, []);
+
+  useEffect(() => {
+    if (activeTab !== 'appointments' || isLoading) return;
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void loadData();
+    }, 10_000);
+    return () => window.clearInterval(intervalId);
+  }, [activeTab, isLoading, loadData]);
 
   const loadUsers = useCallback(async (cursor: string | null, signal?: AbortSignal) => {
     setUsersLoading(true);
@@ -318,6 +373,22 @@ export default function AdminDashboardPage() {
     }, 'บันทึกสิทธิ์ผู้ใช้แล้ว');
   }
 
+  async function openUserProfile(user: ManagedUser) {
+    setProfileTarget(user);
+    setProfileDetail(null);
+    setProfileLoading(true);
+    try {
+      const response = await fetch(`/api/admin/users/${encodeURIComponent(user.id)}`, { cache: 'no-store' });
+      const data = await readJson<{ user: UserProfileDetail }>(response);
+      setProfileDetail(data.user);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'ไม่สามารถโหลดโปรไฟล์ผู้ใช้ได้');
+      setProfileTarget(null);
+    } finally {
+      setProfileLoading(false);
+    }
+  }
+
   async function deleteHospital(hospital: Hospital) {
     if (!window.confirm(`ยืนยันลบสถานพยาบาล “${hospital.name}” และรอบเวลาทั้งหมดหรือไม่? นัดหมายเดิมจะยังคงอยู่ในประวัติ แต่จะไม่ผูกกับสถานพยาบาลนี้`)) return;
     await performAction(`hospital-${hospital.id}`, async () => {
@@ -409,11 +480,10 @@ export default function AdminDashboardPage() {
   }
 
   const availableVaccines = vaccines.filter((vaccine) => vaccine.isActive && vaccine.stock > 0);
-  const pendingAppointments = appointments.filter((appointment) => ['PENDING', 'CONFIRMED', 'RESCHEDULED', 'RESCHEDULE_REQUESTED'].includes(appointment.status));
   const normalizedSearch = searchTerm.trim().toLocaleLowerCase();
   const matchesSearch = (...values: (string | null | undefined)[]) =>
     !normalizedSearch || values.some((value) => value?.toLocaleLowerCase().includes(normalizedSearch));
-  const filteredAppointments = appointments.filter((appointment) => matchesSearch(
+  const searchedAppointments = appointments.filter((appointment) => matchesSearch(
     appointment.id,
     appointment.user.username,
     appointment.user.email,
@@ -422,6 +492,12 @@ export default function AdminDashboardPage() {
     appointment.requestedVaccine,
     appointment.status
   ));
+  const activeAppointments = searchedAppointments.filter((appointment) =>
+    ['PENDING', 'CONFIRMED', 'RESCHEDULED', 'RESCHEDULE_REQUESTED'].includes(appointment.status)
+  );
+  const historicalAppointments = searchedAppointments.filter((appointment) =>
+    ['CANCELLED', 'EXPIRED', 'NO_SHOW', 'COMPLETED'].includes(appointment.status)
+  );
   const filteredHospitals = hospitals.filter((hospital) => matchesSearch(hospital.name, hospital.id));
   const filteredSlots = slots.filter((slot) => matchesSearch(slot.hospital.name, slot.time));
   const filteredVaccines = vaccines.filter((vaccine) => matchesSearch(vaccine.code, vaccine.name));
@@ -489,13 +565,16 @@ export default function AdminDashboardPage() {
           {activeTab === 'appointments' && (
             <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
               <div className="flex flex-col gap-1 border-b p-5 sm:flex-row sm:items-end sm:justify-between">
-              <div><h2 className="text-xl font-extrabold">รายการนัดหมายและคิวรับบริการ</h2><p className="mt-1 text-sm text-slate-500">คิวรอดำเนินการ {pendingAppointments.length} รายการ · พบ {filteredAppointments.length} รายการ</p></div>
+              <div>
+                <h2 className="text-xl font-extrabold">รายการนัดหมายและคิวรับบริการ</h2>
+                <p className="mt-1 text-sm text-slate-500">คิวที่ยังดำเนินการ {activeAppointments.length} รายการ · อัปเดตอัตโนมัติทุก 10 วินาที{lastRefreshedAt ? ` · ล่าสุด ${formatDate(lastRefreshedAt.toISOString())}` : ''}</p>
+              </div>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[900px] text-left text-sm">
                   <thead className="bg-slate-50 text-xs uppercase text-slate-500"><tr><th className="p-4">เด็ก / ผู้ปกครอง</th><th className="p-4">สถานพยาบาล</th><th className="p-4">วันและเวลา</th><th className="p-4">สถานะ</th><th className="p-4">จัดการ</th></tr></thead>
                   <tbody className="divide-y divide-slate-100">
-                    {filteredAppointments.length === 0 ? <tr><td colSpan={5} className="p-10 text-center text-slate-500">{appointments.length ? 'ไม่พบรายการที่ตรงกับคำค้นหา' : 'ยังไม่มีรายการนัดหมาย'}</td></tr> : filteredAppointments.map((appointment) => {
+                    {activeAppointments.length === 0 ? <tr><td colSpan={5} className="p-10 text-center text-slate-500">{appointments.length ? 'ไม่พบคิวที่กำลังดำเนินการ' : 'ยังไม่มีรายการนัดหมาย'}</td></tr> : activeAppointments.map((appointment) => {
                       const isPast = new Date(appointment.scheduledAt) < new Date();
                       
                       return (
@@ -545,6 +624,50 @@ export default function AdminDashboardPage() {
                         </tr>
                       );
                     })}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
+
+          {activeTab === 'appointmentHistory' && (
+            <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <div className="border-b p-5">
+                <h2 className="text-xl font-extrabold">ประวัติการจอง</h2>
+                <p className="mt-1 text-sm text-slate-500">รายการที่ฉีดแล้ว ยกเลิก หมดอายุ หรือไม่มาตามนัด ({historicalAppointments.length})</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[760px] text-left text-sm">
+                  <thead className="bg-slate-50 text-xs text-slate-500">
+                    <tr><th className="p-4">เด็ก / ผู้ปกครอง</th><th className="p-4">สถานพยาบาล</th><th className="p-4">วันและเวลา</th><th className="p-4">วัคซีน</th><th className="p-4">สถานะ</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {historicalAppointments.length === 0 ? (
+                      <tr><td colSpan={5} className="p-10 text-center text-slate-500">{appointments.length ? 'ไม่พบประวัติที่ตรงกับคำค้นหา' : 'ยังไม่มีประวัติการจอง'}</td></tr>
+                    ) : historicalAppointments.map((appointment) => (
+                      <tr key={appointment.id}>
+                        <td className="p-4">
+                          <p className="font-bold">{childName(appointment.child)}</p>
+                          <p className="mt-1 text-xs text-slate-500">{appointment.user.username} · {appointment.user.email}</p>
+                        </td>
+                        <td className="p-4">{appointment.hospitalName}</td>
+                        <td className="whitespace-nowrap p-4">{formatDate(appointment.scheduledAt)}</td>
+                        <td className="p-4">{appointment.requestedVaccine || '—'}</td>
+                        <td className="p-4">
+                          <span className={`rounded-full px-3 py-1 text-xs font-bold ${
+                            appointment.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-700'
+                              : appointment.status === 'CANCELLED' ? 'bg-slate-100 text-slate-600'
+                                : appointment.status === 'EXPIRED' ? 'bg-amber-100 text-amber-800'
+                                  : 'bg-rose-100 text-rose-700'
+                          }`}>
+                            {appointment.status === 'COMPLETED' ? 'ฉีดแล้ว'
+                              : appointment.status === 'CANCELLED' ? 'ยกเลิก'
+                                : appointment.status === 'EXPIRED' ? 'หมดอายุ'
+                                  : 'ไม่มาตามนัด'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
@@ -653,7 +776,7 @@ export default function AdminDashboardPage() {
                   <div className="overflow-x-auto">
                     <table className="w-full min-w-[720px] text-left text-sm">
                       <thead className="bg-slate-50 text-xs text-slate-500">
-                        <tr><th className="p-4">ชื่อผู้ใช้</th><th className="p-4">อีเมล</th><th className="p-4">สมัครเมื่อ</th><th className="p-4">สิทธิ์</th><th className="p-4">จัดการสิทธิ์</th></tr>
+                        <tr><th className="p-4">ชื่อผู้ใช้</th><th className="p-4">อีเมล</th><th className="p-4">สมัครเมื่อ</th><th className="p-4">สิทธิ์</th><th className="p-4">ข้อมูลบัญชี</th></tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                         {users.length === 0 ? (
@@ -669,13 +792,19 @@ export default function AdminDashboardPage() {
                               </span>
                             </td>
                             <td className="p-4">
-                              <button
-                                disabled={busyKey === `user-${user.id}`}
-                                onClick={() => void updateUserRole(user, user.role === 'ADMIN' ? 'USER' : 'ADMIN')}
-                                className={`rounded-lg px-3 py-2 text-xs font-bold disabled:opacity-50 ${user.role === 'ADMIN' ? 'bg-amber-50 text-amber-800 hover:bg-amber-100' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
-                              >
-                                {busyKey === `user-${user.id}` ? 'กำลังบันทึก...' : user.role === 'ADMIN' ? 'ลดสิทธิ์เป็นผู้ใช้' : 'กำหนดเป็นแอดมิน'}
-                              </button>
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  onClick={() => void openUserProfile(user)}
+                                  className="rounded-lg bg-teal-50 px-3 py-2 text-xs font-bold text-teal-800 hover:bg-teal-100"
+                                >ดูโปรไฟล์</button>
+                                <button
+                                  disabled={busyKey === `user-${user.id}`}
+                                  onClick={() => void updateUserRole(user, user.role === 'ADMIN' ? 'USER' : 'ADMIN')}
+                                  className={`rounded-lg px-3 py-2 text-xs font-bold disabled:opacity-50 ${user.role === 'ADMIN' ? 'bg-amber-50 text-amber-800 hover:bg-amber-100' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
+                                >
+                                  {busyKey === `user-${user.id}` ? 'กำลังบันทึก...' : user.role === 'ADMIN' ? 'ลดสิทธิ์เป็นผู้ใช้' : 'กำหนดเป็นแอดมิน'}
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -709,6 +838,125 @@ export default function AdminDashboardPage() {
           )}
         </>}
       </div>
+
+      {profileTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !profileLoading) {
+              setProfileTarget(null);
+              setProfileDetail(null);
+            }
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="user-profile-title"
+            className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl sm:p-7"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 id="user-profile-title" className="text-xl font-extrabold">โปรไฟล์ผู้ใช้งาน</h2>
+                <p className="mt-1 text-sm text-slate-500">{profileTarget.username} · {profileTarget.email}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setProfileTarget(null); setProfileDetail(null); }}
+                aria-label="ปิดโปรไฟล์"
+                className="rounded-lg bg-slate-100 px-3 py-2 text-sm font-bold text-slate-600"
+              >✕</button>
+            </div>
+
+            {profileLoading || !profileDetail ? (
+              <p className="py-12 text-center text-sm text-slate-500">กำลังโหลดข้อมูลโปรไฟล์...</p>
+            ) : (
+              <div className="mt-6 space-y-6">
+                <section className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <h3 className="font-bold">ข้อมูลบัญชี</h3>
+                  <p className="mt-2 text-sm text-slate-700">ชื่อ: {[profileDetail.profile?.firstName, profileDetail.profile?.lastName].filter(Boolean).join(' ') || profileDetail.username}</p>
+                  <p className="mt-1 text-sm text-slate-700">อีเมล: {profileDetail.email}</p>
+                  <p className="mt-1 text-sm text-slate-700">สิทธิ์: {profileDetail.role === 'ADMIN' ? 'แอดมิน' : 'ผู้ใช้'}</p>
+                  {profileDetail.profile?.dob && <p className="mt-1 text-sm text-slate-700">วันเกิด: {new Date(profileDetail.profile.dob).toLocaleDateString('th-TH', { dateStyle: 'medium', timeZone: 'UTC' })}</p>}
+                </section>
+
+                <section>
+                  <h3 className="font-bold">ข้อมูลเด็ก ({profileDetail.children.length})</h3>
+                  {profileDetail.children.length === 0 ? (
+                    <p className="mt-2 rounded-xl bg-slate-50 p-4 text-sm text-slate-500">ยังไม่มีข้อมูลเด็กในบัญชีนี้</p>
+                  ) : (
+                    <div className="mt-3 grid gap-4 md:grid-cols-2">
+                      {profileDetail.children.map((child) => {
+                        const verifiedCount = VACCINE_SCHEDULE.filter((vaccine) =>
+                          child.vaccineRecords.some((record) =>
+                            record.vaccineCode === vaccine.code && record.verificationStatus === 'VERIFIED'
+                          )
+                        ).length;
+                        const progress = Math.round((verifiedCount / VACCINE_SCHEDULE.length) * 100);
+                        return (
+                          <article key={child.id} className="rounded-xl border border-slate-200 p-4">
+                            <h4 className="font-bold">{childName(child)}</h4>
+                            <p className="mt-1 text-xs text-slate-500">
+                              {child.dob ? `เกิด ${new Date(child.dob).toLocaleDateString('th-TH', { dateStyle: 'medium', timeZone: 'UTC' })}` : 'ไม่ระบุวันเกิด'}
+                              {child.gender ? ` · ${child.gender}` : ''}
+                              {child.weight !== null ? ` · ${child.weight} กก.` : ''}
+                              {child.height !== null ? ` · ${child.height} ซม.` : ''}
+                            </p>
+                            <div className="mt-3 flex items-center gap-3">
+                              <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-label={`ความคืบหน้าวัคซีนของ${childName(child)}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}>
+                                <div className="h-full rounded-full bg-teal-500" style={{ width: `${progress}%` }} />
+                              </div>
+                              <span className="text-sm font-bold text-teal-800">{progress}%</span>
+                            </div>
+                            <p className="mt-1 text-xs text-slate-500">{verifiedCount}/{VACCINE_SCHEDULE.length} เข็มตามกำหนด · ประวัติทั้งหมด {child.vaccineRecords.length} รายการ</p>
+                            {child.vaccineRecords.length > 0 && (
+                              <ul className="mt-3 max-h-36 space-y-1 overflow-y-auto border-t border-slate-100 pt-2">
+                                {child.vaccineRecords.map((record) => (
+                                  <li key={record.id} className="flex justify-between gap-2 text-xs">
+                                    <span className="truncate">{record.vaccineName} · {new Date(record.administeredDate).toLocaleDateString('th-TH', { dateStyle: 'medium', timeZone: 'UTC' })}</span>
+                                    <span className={record.verificationStatus === 'VERIFIED' ? 'shrink-0 font-semibold text-emerald-700' : 'shrink-0 text-amber-700'}>
+                                      {record.verificationStatus === 'VERIFIED' ? 'ยืนยันแล้ว' : record.verificationStatus === 'REJECTED' ? 'ไม่ยืนยัน' : 'รอตรวจ'}
+                                    </span>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </article>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
+
+                <section>
+                  <h3 className="font-bold">ประวัติการจอง ({profileDetail.appointments.length})</h3>
+                  {profileDetail.appointments.length === 0 ? (
+                    <p className="mt-2 rounded-xl bg-slate-50 p-4 text-sm text-slate-500">ยังไม่มีประวัติการจอง</p>
+                  ) : (
+                    <div className="mt-3 overflow-x-auto rounded-xl border border-slate-200">
+                      <table className="w-full min-w-[620px] text-left text-sm">
+                        <thead className="bg-slate-50 text-xs text-slate-500">
+                          <tr><th className="p-3">เด็ก</th><th className="p-3">สถานพยาบาล / วัคซีน</th><th className="p-3">วันนัด</th><th className="p-3">สถานะ</th></tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {profileDetail.appointments.map((appointment) => (
+                            <tr key={appointment.id}>
+                              <td className="p-3">{childName(appointment.child)}</td>
+                              <td className="p-3">{appointment.hospitalName}<span className="mt-1 block text-xs text-slate-500">{appointment.requestedVaccine || 'ไม่ระบุวัคซีน'}</span></td>
+                              <td className="whitespace-nowrap p-3">{formatDate(appointment.scheduledAt)}</td>
+                              <td className="p-3">{appointment.status === 'COMPLETED' ? 'ฉีดแล้ว' : appointment.status === 'CANCELLED' ? 'ยกเลิก' : appointment.status === 'EXPIRED' ? 'หมดอายุ' : appointment.status === 'NO_SHOW' ? 'ไม่มาตามนัด' : appointment.status === 'PENDING' ? 'รออนุมัติ' : appointment.status === 'CONFIRMED' ? 'ยืนยันแล้ว' : appointment.status}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </section>
+              </div>
+            )}
+          </section>
+        </div>
+      )}
 
       {/* ป๊อปอัพสำหรับเลื่อนนัดหมาย */}
       {rescheduleTarget && (
