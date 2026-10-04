@@ -149,6 +149,8 @@ export default function AdminDashboardPage() {
   const [hospitalId, setHospitalId] = useState('');
   const [hospitalName, setHospitalName] = useState('');
   const [hospitalNameEdits, setHospitalNameEdits] = useState<Record<string, string>>({});
+  const [selectedSlotHospitalId, setSelectedSlotHospitalId] = useState('');
+  const [slotCapacityEdits, setSlotCapacityEdits] = useState<Record<string, number>>({});
   const [searchTerm, setSearchTerm] = useState('');
   const [slotDate, setSlotDate] = useState('');
   const [slotTime, setSlotTime] = useState('09:00');
@@ -186,6 +188,7 @@ export default function AdminDashboardPage() {
       setAppointments(appointmentData.appointments);
       setHospitals(slotData.hospitals);
       setSlots(slotData.slots);
+      setSlotCapacityEdits({});
       setVaccines(vaccineData.vaccines);
       setRecords(recordData.records);
       setError('');
@@ -218,6 +221,7 @@ export default function AdminDashboardPage() {
         setAppointments(appointmentData.appointments);
         setHospitals(slotData.hospitals);
         setSlots(slotData.slots);
+        setSlotCapacityEdits({});
         setVaccines(vaccineData.vaccines);
         setRecords(recordData.records);
         setLastRefreshedAt(new Date());
@@ -499,7 +503,15 @@ export default function AdminDashboardPage() {
     ['CANCELLED', 'EXPIRED', 'NO_SHOW', 'COMPLETED'].includes(appointment.status)
   );
   const filteredHospitals = hospitals.filter((hospital) => matchesSearch(hospital.name, hospital.id));
-  const filteredSlots = slots.filter((slot) => matchesSearch(slot.hospital.name, slot.time));
+  const filteredSlots = slots.filter((slot) =>
+    (!selectedSlotHospitalId || slot.hospitalId === selectedSlotHospitalId) &&
+    matchesSearch(slot.hospital.name, slot.time)
+  );
+  const slotsByDate = filteredSlots.reduce<Record<string, HospitalSlot[]>>((groups, slot) => {
+    const dateKey = slot.date.slice(0, 10);
+    (groups[dateKey] ??= []).push(slot);
+    return groups;
+  }, {});
   const filteredVaccines = vaccines.filter((vaccine) => matchesSearch(vaccine.code, vaccine.name));
   const filteredRecords = records.filter((record) => matchesSearch(
     record.user.username,
@@ -676,9 +688,150 @@ export default function AdminDashboardPage() {
 
           {activeTab === 'slots' && (
             <div className="space-y-6">
+              <section className="rounded-2xl border border-teal-100 bg-white p-5 shadow-sm sm:p-6">
+                <div className="max-w-2xl">
+                  <p className="text-xs font-bold uppercase tracking-wide text-teal-700">ขั้นตอนที่ 1</p>
+                  <h2 className="mt-1 text-xl font-extrabold">เพิ่มรอบบริการ</h2>
+                  <p className="mt-1 text-sm text-slate-500">เลือกสถานพยาบาล วัน เวลา และจำนวนคิวที่รับได้</p>
+                </div>
+                <form onSubmit={(event) => void saveSlot(event)} className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-6">
+                  <label className="text-sm font-semibold text-slate-700 lg:col-span-2">
+                    สถานพยาบาล
+                    <select
+                        required
+                        value={hospitalId}
+                        onChange={(event) => setHospitalId(event.target.value)}
+                        className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 font-normal"
+                      >
+                        <option value="">เลือกสถานพยาบาล</option>
+                        {hospitals.filter((hospital) => hospital.isActive).map((hospital) => (
+                          <option key={hospital.id} value={hospital.id}>{hospital.name}</option>
+                        ))}
+                        <option value="new">เพิ่มสถานพยาบาลใหม่...</option>
+                      </select>
+                    </label>
+                    {hospitalId === 'new' && (
+                    <label className="text-sm font-semibold text-slate-700 lg:col-span-2">
+                      ชื่อสถานพยาบาลใหม่
+                      <input
+                        required
+                        value={hospitalName}
+                        onChange={(event) => setHospitalName(event.target.value)}
+                        placeholder="เช่น โรงพยาบาล..."
+                        className="mt-1.5 w-full rounded-xl border border-slate-300 px-3 py-2.5 font-normal"
+                      />
+                    </label>
+                  )}
+                  <label className="text-sm font-semibold text-slate-700">
+                    วันที่
+                    <input required type="date" value={slotDate} onChange={(event) => setSlotDate(event.target.value)} className="mt-1.5 w-full rounded-xl border border-slate-300 px-3 py-2.5 font-normal" />
+                  </label>
+                  <label className="text-sm font-semibold text-slate-700">
+                    เวลานัด
+                    <input required type="time" value={slotTime} onChange={(event) => setSlotTime(event.target.value)} className="mt-1.5 w-full rounded-xl border border-slate-300 px-3 py-2.5 font-normal" />
+                  </label>
+                  <label className="text-sm font-semibold text-slate-700">
+                    รับได้สูงสุด (คน)
+                    <input required type="number" min={1} max={500} value={slotCapacity} onChange={(event) => setSlotCapacity(Number(event.target.value))} className="mt-1.5 w-full rounded-xl border border-slate-300 px-3 py-2.5 font-normal" />
+                  </label>
+                  <div className="flex items-end lg:col-span-2">
+                    <button disabled={busyKey === 'new-slot'} className="w-full rounded-xl bg-teal-700 px-5 py-3 text-sm font-bold text-white hover:bg-teal-800 disabled:opacity-50">
+                      {busyKey === 'new-slot' ? 'กำลังบันทึก...' : '＋ บันทึกรอบเวลา'}
+                    </button>
+                  </div>
+                </form>
+              </section>
+
               <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                <div className="border-b p-5"><h3 className="font-extrabold">รายชื่อสถานพยาบาล</h3></div>
-                <ul className="divide-y divide-slate-100">
+                <div className="flex flex-col gap-3 border-b p-5 sm:flex-row sm:items-end sm:justify-between">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wide text-teal-700">ขั้นตอนที่ 2</p>
+                    <h2 className="mt-1 text-xl font-extrabold">รอบที่เปิดไว้</h2>
+                    <p className="mt-1 text-sm text-slate-500">แสดงตามวัน · {filteredSlots.length} รอบ</p>
+                  </div>
+                  <label className="text-sm font-semibold text-slate-700 sm:min-w-64">
+                    กรองตามสถานพยาบาล
+                    <select
+                      value={selectedSlotHospitalId}
+                      onChange={(event) => setSelectedSlotHospitalId(event.target.value)}
+                      className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 font-normal"
+                    >
+                      <option value="">สถานพยาบาลทั้งหมด</option>
+                      {hospitals.map((hospital) => (
+                        <option key={hospital.id} value={hospital.id}>{hospital.name}{hospital.isActive ? '' : ' (ปิดรับจอง)'}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                {filteredSlots.length === 0 ? (
+                  <div className="p-10 text-center">
+                    <p className="font-semibold text-slate-700">{slots.length ? 'ไม่พบรอบเวลาที่ตรงกับตัวกรอง' : 'ยังไม่มีรอบเวลาในอนาคต'}</p>
+                    <p className="mt-1 text-sm text-slate-500">เพิ่มรอบใหม่จากฟอร์มด้านบน หรือเปลี่ยนสถานพยาบาลที่เลือก</p>
+                  </div>
+                ) : (
+                  <div className="space-y-5 p-4 sm:p-5">
+                    {Object.entries(slotsByDate).map(([dateKey, daySlots]) => (
+                      <section key={dateKey} className="overflow-hidden rounded-xl border border-slate-200">
+                        <header className="flex items-center justify-between gap-3 bg-slate-50 px-4 py-3">
+                          <h3 className="font-bold text-slate-800">{formatSlotDate(dateKey)}</h3>
+                          <span className="text-xs text-slate-500">{daySlots.length} รอบ</span>
+                        </header>
+                        <ul className="divide-y divide-slate-100">
+                          {daySlots.map((slot) => (
+                            <li key={slot.id} className="flex flex-col gap-3 p-4 lg:flex-row lg:items-center">
+                              <div className="min-w-0 flex-1">
+                                <p className="font-bold text-slate-800">{slot.time} น. <span className="font-normal text-slate-500">· {slot.hospital.name}</span></p>
+                                <span className={`mt-1 inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${!slot.isAdminDefined ? 'bg-slate-100 text-slate-600' : slot.isClosed ? 'bg-rose-100 text-rose-700' : slot.booked >= slot.capacity ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                                  {!slot.isAdminDefined ? 'ซ่อนจากผู้ใช้' : slot.isClosed ? 'ปิดรอบ' : slot.booked >= slot.capacity ? 'เต็มแล้ว' : 'เปิดรับจอง'}
+                                </span>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-xs text-slate-500">จองแล้ว {slot.booked} /</span>
+                                <label className="sr-only" htmlFor={`capacity-${slot.id}`}>จำนวนคิวสูงสุดสำหรับ {slot.hospital.name} เวลา {slot.time}</label>
+                                <input
+                                  id={`capacity-${slot.id}`}
+                                  type="number"
+                                  min={Math.max(1, slot.booked)}
+                                  max={500}
+                                  value={slotCapacityEdits[slot.id] ?? slot.capacity}
+                                  onChange={(event) => setSlotCapacityEdits((current) => ({ ...current, [slot.id]: Number(event.target.value) }))}
+                                  className="w-20 rounded-lg border border-slate-300 px-2 py-2 text-center text-sm"
+                                />
+                                <span className="text-xs text-slate-500">คน</span>
+                                {(slotCapacityEdits[slot.id] ?? slot.capacity) !== slot.capacity && (
+                                  <button
+                                    disabled={busyKey === `slot-${slot.id}`}
+                                    onClick={() => void updateSlot(slot.id, { capacity: slotCapacityEdits[slot.id] ?? slot.capacity })}
+                                    className="rounded-lg bg-teal-700 px-3 py-2 text-xs font-bold text-white disabled:opacity-50"
+                                  >บันทึก</button>
+                                )}
+                                <button
+                                  disabled={busyKey === `slot-${slot.id}`}
+                                  onClick={() => void updateSlot(slot.id, { isClosed: !slot.isClosed })}
+                                  className={`rounded-lg px-3 py-2 text-xs font-bold ${slot.isClosed ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}
+                                >{slot.isClosed ? 'เปิดรอบ' : 'ปิดรอบ'}</button>
+                                <button
+                                  disabled={busyKey === `slot-${slot.id}`}
+                                  onClick={() => void updateSlot(slot.id, { isAdminDefined: !slot.isAdminDefined })}
+                                  className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold text-slate-700"
+                                >{slot.isAdminDefined ? 'ซ่อนจากผู้ใช้' : 'แสดงให้ผู้ใช้'}</button>
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </section>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <details className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-5 font-bold text-slate-800">
+                  <span>จัดการรายชื่อและข้อมูลสถานพยาบาล</span>
+                  <span className="text-sm font-normal text-slate-500 group-open:hidden">แสดงตัวเลือก</span>
+                  <span className="hidden text-sm font-normal text-slate-500 group-open:inline">ซ่อนตัวเลือก</span>
+                </summary>
+                <ul className="divide-y divide-slate-100 border-t border-slate-100">
                   {filteredHospitals.length === 0 ? <li className="p-5 text-sm text-slate-500">{hospitals.length ? 'ไม่พบสถานพยาบาลที่ตรงกับคำค้นหา' : 'ยังไม่มีรายชื่อสถานพยาบาล'}</li> : filteredHospitals.map((hospital) => (
                     <li key={hospital.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
                       <input
@@ -703,30 +856,7 @@ export default function AdminDashboardPage() {
                     </li>
                   ))}
                 </ul>
-              </section>
-              <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-                <h2 className="text-xl font-extrabold">เปิดรอบเวลาและกำหนดความจุ</h2>
-                <p className="mt-1 text-sm text-slate-500">ใช้จัดการความจุและรอบบริการเดิม; ผู้ใช้ยังส่งคำขอวันเวลาที่ต้องการได้โดยไม่ต้องมีรอบเปิดล่วงหน้า</p>
-                <form onSubmit={(event) => void saveSlot(event)} className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-6">
-                  <select value={hospitalId} onChange={(event) => setHospitalId(event.target.value)} className="rounded-xl border border-slate-300 bg-white px-3 py-2.5 md:col-span-2"><option value="">เพิ่มสถานพยาบาลใหม่ด้วยชื่อ...</option>{hospitals.filter((hospital) => hospital.isActive).map((hospital) => <option key={hospital.id} value={hospital.id}>{hospital.name}</option>)}</select>
-                  {!hospitalId && <input required value={hospitalName} onChange={(event) => setHospitalName(event.target.value)} placeholder="ชื่อโรงพยาบาล/รพ.สต." className="rounded-xl border border-slate-300 px-3 py-2.5 md:col-span-2" />}
-                  <input required type="date" value={slotDate} onChange={(event) => setSlotDate(event.target.value)} className="rounded-xl border border-slate-300 px-3 py-2.5" />
-                  <input required type="time" value={slotTime} onChange={(event) => setSlotTime(event.target.value)} className="rounded-xl border border-slate-300 px-3 py-2.5" />
-                  <label className="flex items-center gap-2 rounded-xl border border-slate-300 px-3 py-2.5 text-sm md:col-span-2">รับได้ <input required type="number" min={1} max={500} value={slotCapacity} onChange={(event) => setSlotCapacity(Number(event.target.value))} className="w-20 rounded border border-slate-200 px-2 py-1" /> คน</label>
-                  <button disabled={busyKey === 'new-slot'} className="rounded-xl bg-teal-600 px-4 py-2.5 font-bold text-white hover:bg-teal-700 disabled:opacity-50 md:col-span-2">เปิด/บันทึกรอบเวลา</button>
-                </form>
-              </section>
-              <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                <div className="border-b p-5"><h3 className="font-extrabold">รอบเวลาที่บันทึกไว้</h3></div>
-                <div className="overflow-x-auto"><table className="w-full min-w-[700px] text-left text-sm">
-                  <thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="p-4">วัน / เวลา</th><th className="p-4">สถานพยาบาล</th><th className="p-4">คิว</th><th className="p-4">สถานะ</th><th className="p-4">จัดการ</th></tr></thead>
-                  <tbody className="divide-y divide-slate-100">{filteredSlots.length === 0 ? <tr><td colSpan={5} className="p-10 text-center text-slate-500">{slots.length ? 'ไม่พบรอบเวลาที่ตรงกับคำค้นหา' : 'ยังไม่มีรอบเวลาในอนาคต'}</td></tr> : filteredSlots.map((slot) => <tr key={slot.id}>
-                    <td className="p-4">{formatSlotDate(slot.date)} · {slot.time}</td><td className="p-4">{slot.hospital.name}</td><td className="p-4">{slot.booked} / {slot.capacity}</td>
-                    <td className="p-4"><span className={`rounded-full px-3 py-1 text-xs font-bold ${!slot.isAdminDefined ? 'bg-slate-100 text-slate-600' : slot.isClosed ? 'bg-rose-100 text-rose-700' : slot.booked >= slot.capacity ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>{!slot.isAdminDefined ? 'ยังไม่แสดงผู้ใช้' : slot.isClosed ? 'ปิดรอบ' : slot.booked >= slot.capacity ? 'เต็ม' : 'เปิดรับ'}</span></td>
-                    <td className="p-4"><div className="flex gap-2"><button onClick={() => { const value = window.prompt('กำหนดจำนวนคิวทั้งหมด (ต้องไม่น้อยกว่าจำนวนที่จองแล้ว)', String(slot.capacity)); if (value !== null && /^\d+$/.test(value)) void updateSlot(slot.id, { capacity: Number(value) }); }} className="rounded-lg bg-slate-100 px-3 py-2 text-xs font-bold">แก้ความจุ</button><button onClick={() => void updateSlot(slot.id, { isClosed: !slot.isClosed })} className={`rounded-lg px-3 py-2 text-xs font-bold ${slot.isClosed ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>{slot.isClosed ? 'เปิดรอบ' : 'ปิดฉุกเฉิน'}</button><button onClick={() => void updateSlot(slot.id, { isAdminDefined: !slot.isAdminDefined })} className={`rounded-lg px-3 py-2 text-xs font-bold ${slot.isAdminDefined ? 'bg-slate-100 text-slate-700' : 'bg-teal-50 text-teal-700'}`}>{slot.isAdminDefined ? 'ซ่อนผู้ใช้' : 'แสดงผู้ใช้'}</button></div></td>
-                  </tr>)}</tbody>
-                </table></div>
-              </section>
+              </details>
             </div>
           )}
 
