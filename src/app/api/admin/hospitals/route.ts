@@ -4,6 +4,53 @@ import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
 
+export async function POST(req: Request) {
+  const session = await getAdminSession();
+  if (!session) {
+    return NextResponse.json({ error: 'ไม่มีสิทธิ์ดำเนินการนี้' }, { status: 403 });
+  }
+
+  try {
+    const body: unknown = await req.json();
+    if (typeof body !== 'object' || body === null) {
+      return NextResponse.json({ error: 'ข้อมูลสถานพยาบาลไม่ถูกต้อง' }, { status: 400 });
+    }
+
+    const { name, address, latitude, longitude } = body as {
+      name?: unknown;
+      address?: unknown;
+      latitude?: unknown;
+      longitude?: unknown;
+    };
+    if (typeof name !== 'string' || !name.trim() || name.trim().length > 200) {
+      return NextResponse.json({ error: 'ชื่อสถานพยาบาลต้องมี 1 ถึง 200 ตัวอักษร' }, { status: 400 });
+    }
+    if (address !== undefined && (typeof address !== 'string' || address.trim().length > 500)) {
+      return NextResponse.json({ error: 'ที่อยู่ต้องมีไม่เกิน 500 ตัวอักษร' }, { status: 400 });
+    }
+    const hasLatitude = latitude !== undefined;
+    const hasLongitude = longitude !== undefined;
+    if (hasLatitude !== hasLongitude ||
+      (hasLatitude && (typeof latitude !== 'number' || !Number.isFinite(latitude) || latitude < -90 || latitude > 90)) ||
+      (hasLongitude && (typeof longitude !== 'number' || !Number.isFinite(longitude) || longitude < -180 || longitude > 180))) {
+      return NextResponse.json({ error: 'กรุณาระบุพิกัดละติจูดและลองจิจูดให้ถูกต้องทั้งคู่' }, { status: 400 });
+    }
+
+    const hospital = await prisma.hospital.create({
+      data: {
+        name: name.trim(),
+        ...(typeof address === 'string' && address.trim() ? { address: address.trim() } : {}),
+        ...(hasLatitude && typeof latitude === 'number' && typeof longitude === 'number'
+          ? { latitude, longitude }
+          : {}),
+      },
+    });
+    return NextResponse.json({ success: true, hospital }, { status: 201 });
+  } catch {
+    return NextResponse.json({ error: 'ไม่สามารถเพิ่มสถานพยาบาลได้' }, { status: 500 });
+  }
+}
+
 export async function PATCH(req: Request) {
   const session = await getAdminSession();
   if (!session) {

@@ -137,8 +137,8 @@ export async function GET(req: Request) {
       const overpassQuery = `
         [out:json][timeout:20];
         (
-          nwr(around:${SEARCH_RADIUS_METERS},${latitude},${longitude})[amenity~"^(hospital|clinic)$"];
-          nwr(around:${SEARCH_RADIUS_METERS},${latitude},${longitude})[healthcare~"^(hospital|clinic|health_post|centre)$"];
+          nwr(around:${SEARCH_RADIUS_METERS},${latitude},${longitude})[amenity~"^(hospital|clinic|doctors)$"];
+          nwr(around:${SEARCH_RADIUS_METERS},${latitude},${longitude})[healthcare~"^(hospital|clinic|health_post|centre|community_health_centre|primary_care)$"];
         );
         out center;
       `;
@@ -220,6 +220,8 @@ export async function GET(req: Request) {
             OR: [
               { id: { in: hospitalIds } },
               { slots: { some: { date: { gte: bangkokToday }, isAdminDefined: true } } },
+              { latitude: null },
+              { longitude: null },
             ],
           },
       include: {
@@ -265,9 +267,8 @@ export async function GET(req: Request) {
         if (mappedHospitalIds.has(hospital.id)) continue;
 
         const availableDates = slotsByHospitalId.get(hospital.id) ?? [];
-        if (availableDates.length === 0) continue;
-
         const hasCoordinates = hospital.latitude !== null && hospital.longitude !== null;
+        if (availableDates.length === 0 && hasCoordinates) continue;
         const distanceVal = hasCoordinates
           ? getDistance(latitude!, longitude!, hospital.latitude!, hospital.longitude!)
           : Number.MAX_SAFE_INTEGER;

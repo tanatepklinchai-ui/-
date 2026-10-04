@@ -12,6 +12,12 @@ type HospitalOption = {
   id: string;
   name: string;
   distance: string;
+  availableDates: {
+    date: string;
+    dateString: string;
+    slots: string[];
+    fullSlots: string[];
+  }[];
 };
 
 type Appointment = {
@@ -98,6 +104,7 @@ export default function ColorfulDashboard() {
   const [hospitalSearchQuery, setHospitalSearchQuery] = useState('');
   const [selectedHospital, setSelectedHospital] = useState<string | null>(null);
   const [bookingDateTime, setBookingDateTime] = useState('');
+  const [selectedBookingDate, setSelectedBookingDate] = useState('');
   const [vaccineToBook, setVaccineToBook] = useState<{ name: string; age: string } | null>(null);
   const [realHospitals, setRealHospitals] = useState<HospitalOption[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -455,6 +462,7 @@ export default function ColorfulDashboard() {
           setRealHospitals(hospitals);
           setSelectedHospital(null);
           setBookingDateTime('');
+          setSelectedBookingDate('');
 
           // 👉 2. แจ้งเตือนเมื่อดึงข้อมูลเสร็จแล้ว
           if (hospitals.length > 0) {
@@ -521,6 +529,7 @@ export default function ColorfulDashboard() {
       ));
       setSelectedHospital(null);
       setBookingDateTime('');
+      setSelectedBookingDate('');
       setVaccineToBook(null);
       notify(
         'success',
@@ -1150,7 +1159,10 @@ export default function ColorfulDashboard() {
                         key={hospital.id}
                         className={`border-2 rounded-2xl p-5 transition-all cursor-pointer ${selectedHospital === hospital.id ? 'border-rose-400 bg-rose-50/40 shadow-md' : 'border-slate-100 bg-white hover:border-rose-200'}`}
                         onClick={() => {
-                          if (selectedHospital !== hospital.id) setBookingDateTime('');
+                          if (selectedHospital !== hospital.id) {
+                            setBookingDateTime('');
+                            setSelectedBookingDate('');
+                          }
                           setSelectedHospital(hospital.id);
                         }}
                       >
@@ -1170,18 +1182,73 @@ export default function ColorfulDashboard() {
 
                         {selectedHospital === hospital.id && (
                           <div className="mt-5 space-y-3 border-t border-rose-100 pt-5 animate-fade-in-up">
-                            <p className="text-xs font-bold text-slate-700">เลือกวันและเวลาที่สะดวก ระบบจะส่งคำขอให้เจ้าหน้าที่อนุมัติ (ไม่ต้องรอรอบว่าง)</p>
-                            <label className="block text-xs font-semibold text-slate-600" onClick={(event) => event.stopPropagation()}>
-                              วันและเวลา
-                              <input
-                                type="datetime-local"
-                                required
-                                min={getBangkokDateTimeInput(new Date())}
-                                value={bookingDateTime}
-                                onChange={(event) => setBookingDateTime(event.target.value)}
-                                className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800"
-                              />
-                            </label>
+                            {hospital.availableDates.length > 0 ? (
+                              <>
+                                <p className="text-xs font-bold text-slate-700">เลือกรอบที่ยังว่าง ระบบจะส่งคำขอให้เจ้าหน้าที่อนุมัติ</p>
+                                <div>
+                                  <p className="mb-2 text-xs font-semibold text-slate-600">1. เลือกวัน</p>
+                                  <div className="flex flex-wrap gap-2">
+                                    {hospital.availableDates.map((date) => (
+                                      <button
+                                        key={date.dateString}
+                                        type="button"
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          setSelectedBookingDate(date.dateString);
+                                          setBookingDateTime('');
+                                        }}
+                                        className={`rounded-xl border px-3 py-2 text-xs font-bold transition ${selectedBookingDate === date.dateString ? 'border-rose-500 bg-rose-500 text-white' : 'border-slate-200 bg-white text-slate-700 hover:border-rose-300'}`}
+                                      >
+                                        {date.date}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                                {selectedBookingDate && (
+                                  <div>
+                                    <p className="mb-2 text-xs font-semibold text-slate-600">2. เลือกเวลา</p>
+                                    <div className="flex flex-wrap gap-2">
+                                      {hospital.availableDates.find((date) => date.dateString === selectedBookingDate)?.slots.map((time) => (
+                                        <button
+                                          key={time}
+                                          type="button"
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            setBookingDateTime(`${selectedBookingDate}T${time}`);
+                                          }}
+                                          className={`rounded-xl border px-4 py-2.5 text-sm font-bold transition ${bookingDateTime === `${selectedBookingDate}T${time}` ? 'border-rose-500 bg-rose-500 text-white' : 'border-slate-200 bg-white text-slate-700 hover:border-rose-300'}`}
+                                        >
+                                          {time} น.
+                                        </button>
+                                      ))}
+                                      {hospital.availableDates.find((date) => date.dateString === selectedBookingDate)?.fullSlots.map((time) => (
+                                        <span key={time} className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-2.5 text-sm text-slate-400" aria-label={`เวลา ${time} น. เต็มแล้ว`}>
+                                          {time} น. · เต็ม
+                                        </span>
+                                      ))}
+                                      {hospital.availableDates.find((date) => date.dateString === selectedBookingDate)?.slots.length === 0 && (
+                                        <p className="text-xs text-slate-500">รอบวันนี้เต็มแล้ว กรุณาเลือกวันอื่น</p>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+                              </>
+                            ) : (
+                              <>
+                                <p className="text-xs font-bold text-slate-700">ยังไม่มีรอบเวลาที่สถานพยาบาลกำหนด เลือกวันและเวลาที่สะดวกเพื่อส่งคำขอ</p>
+                                <label className="block text-xs font-semibold text-slate-600" onClick={(event) => event.stopPropagation()}>
+                                  วันและเวลา
+                                  <input
+                                    type="datetime-local"
+                                    required
+                                    min={getBangkokDateTimeInput(new Date())}
+                                    value={bookingDateTime}
+                                    onChange={(event) => setBookingDateTime(event.target.value)}
+                                    className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800"
+                                  />
+                                </label>
+                              </>
+                            )}
                           </div>
                         )}
                       </div>

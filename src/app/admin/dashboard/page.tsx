@@ -59,7 +59,14 @@ type Appointment = {
   user: { username: string; email: string };
   child: { firstName: string | null; lastName: string | null; dob: string | null };
 };
-type Hospital = { id: string; name: string; isActive: boolean };
+type Hospital = {
+  id: string;
+  name: string;
+  isActive: boolean;
+  address: string | null;
+  latitude: number | null;
+  longitude: number | null;
+};
 type HospitalSlot = {
   id: string;
   hospitalId: string;
@@ -148,6 +155,10 @@ export default function AdminDashboardPage() {
   const [selectedVaccines, setSelectedVaccines] = useState<Record<string, string>>({});
   const [hospitalId, setHospitalId] = useState('');
   const [hospitalName, setHospitalName] = useState('');
+  const [newHospitalName, setNewHospitalName] = useState('');
+  const [newHospitalAddress, setNewHospitalAddress] = useState('');
+  const [newHospitalLatitude, setNewHospitalLatitude] = useState('');
+  const [newHospitalLongitude, setNewHospitalLongitude] = useState('');
   const [hospitalNameEdits, setHospitalNameEdits] = useState<Record<string, string>>({});
   const [selectedSlotHospitalId, setSelectedSlotHospitalId] = useState('');
   const [slotCapacityEdits, setSlotCapacityEdits] = useState<Record<string, number>>({});
@@ -413,7 +424,31 @@ export default function AdminDashboardPage() {
         body: JSON.stringify({ hospitalId, ...update }),
       });
       await readJson(response);
+      if (update.name !== undefined) {
+        setHospitalNameEdits((current) => ({ ...current, [hospitalId]: update.name?.trim() ?? '' }));
+      }
     }, update.name !== undefined ? 'บันทึกชื่อสถานพยาบาลแล้ว' : update.isActive ? 'เปิดสถานพยาบาลแล้ว' : 'ปิดสถานพยาบาลแล้ว');
+  }
+
+  async function createHospital(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await performAction('new-hospital', async () => {
+      const response = await fetch('/api/admin/hospitals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newHospitalName,
+          address: newHospitalAddress || undefined,
+          latitude: newHospitalLatitude ? Number(newHospitalLatitude) : undefined,
+          longitude: newHospitalLongitude ? Number(newHospitalLongitude) : undefined,
+        }),
+      });
+      await readJson(response);
+      setNewHospitalName('');
+      setNewHospitalAddress('');
+      setNewHospitalLatitude('');
+      setNewHospitalLongitude('');
+    }, 'เพิ่มสถานพยาบาลแล้ว');
   }
 
   async function saveSlot(event: FormEvent<HTMLFormElement>) {
@@ -422,8 +457,8 @@ export default function AdminDashboardPage() {
       const response = await fetch('/api/admin/slots', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          hospitalId: hospitalId || undefined,
-          hospitalName: hospitalId ? undefined : hospitalName,
+          hospitalId: hospitalId && hospitalId !== 'new' ? hospitalId : undefined,
+          hospitalName: hospitalId === 'new' ? hospitalName : undefined,
           date: slotDate,
           time: slotTime,
           capacity: slotCapacity,
@@ -825,12 +860,36 @@ export default function AdminDashboardPage() {
                 )}
               </section>
 
-              <details className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <details open className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-5 font-bold text-slate-800">
-                  <span>จัดการรายชื่อและข้อมูลสถานพยาบาล</span>
+                  <span>จัดการรายชื่อและข้อมูลสถานพยาบาล ({hospitals.length} แห่ง)</span>
                   <span className="text-sm font-normal text-slate-500 group-open:hidden">แสดงตัวเลือก</span>
                   <span className="hidden text-sm font-normal text-slate-500 group-open:inline">ซ่อนตัวเลือก</span>
                 </summary>
+                <form onSubmit={(event) => void createHospital(event)} className="grid grid-cols-1 gap-3 border-t border-slate-100 bg-slate-50 p-4 sm:grid-cols-2 lg:grid-cols-6">
+                  <label className="text-xs font-semibold text-slate-700 sm:col-span-2 lg:col-span-2">
+                    ชื่อสถานพยาบาลใหม่
+                    <input required maxLength={200} value={newHospitalName} onChange={(event) => setNewHospitalName(event.target.value)} placeholder="เช่น รพ.สต.บ้าน..." className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal" />
+                  </label>
+                  <label className="text-xs font-semibold text-slate-700 sm:col-span-2 lg:col-span-2">
+                    ที่อยู่ (ไม่บังคับ)
+                    <input maxLength={500} value={newHospitalAddress} onChange={(event) => setNewHospitalAddress(event.target.value)} placeholder="ตำบล / อำเภอ / จังหวัด" className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal" />
+                  </label>
+                  <label className="text-xs font-semibold text-slate-700">
+                    ละติจูด (ไม่บังคับ)
+                    <input type="number" step="any" min={-90} max={90} value={newHospitalLatitude} onChange={(event) => setNewHospitalLatitude(event.target.value)} placeholder="เช่น 15.1389" className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal" />
+                  </label>
+                  <label className="text-xs font-semibold text-slate-700">
+                    ลองจิจูด (ไม่บังคับ)
+                    <input type="number" step="any" min={-180} max={180} value={newHospitalLongitude} onChange={(event) => setNewHospitalLongitude(event.target.value)} placeholder="เช่น 100.2755" className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal" />
+                  </label>
+                  <p className="text-xs text-slate-500 sm:col-span-2 lg:col-span-4">ใส่พิกัดทั้งสองช่องเพื่อให้ผู้ใช้ค้นหาสถานพยาบาลนี้จากตำแหน่ง GPS ได้ หากยังไม่มีพิกัด ผู้ใช้ยังค้นหาจากชื่อได้</p>
+                  <div className="flex items-end lg:col-span-2">
+                    <button disabled={busyKey === 'new-hospital'} className="w-full rounded-lg bg-teal-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-teal-800 disabled:opacity-50">
+                      {busyKey === 'new-hospital' ? 'กำลังบันทึก...' : '＋ เพิ่มสถานพยาบาล'}
+                    </button>
+                  </div>
+                </form>
                 <ul className="divide-y divide-slate-100 border-t border-slate-100">
                   {filteredHospitals.length === 0 ? <li className="p-5 text-sm text-slate-500">{hospitals.length ? 'ไม่พบสถานพยาบาลที่ตรงกับคำค้นหา' : 'ยังไม่มีรายชื่อสถานพยาบาล'}</li> : filteredHospitals.map((hospital) => (
                     <li key={hospital.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
