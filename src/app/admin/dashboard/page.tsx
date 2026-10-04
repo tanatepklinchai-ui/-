@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { VACCINE_SCHEDULE } from '@/lib/vaccineSchedule';
-import HospitalLocationPicker from '@/components/HospitalLocationPicker';
 
 type Tab = 'appointments' | 'appointmentHistory' | 'hospitals' | 'slots' | 'vaccines' | 'records' | 'users';
 type ManagedUser = {
@@ -136,6 +135,39 @@ function childName(child: { firstName: string | null; lastName: string | null })
   return [child.firstName, child.lastName].filter(Boolean).join(' ') || 'ไม่ระบุชื่อเด็ก';
 }
 
+function parseMapCoordinates(value: string) {
+  const candidates = [value];
+  try {
+    candidates.push(decodeURIComponent(value));
+  } catch {
+    // Keep parsing the original input when it is not a valid encoded URL.
+  }
+
+  try {
+    const url = new URL(value);
+    candidates.push(url.pathname, ...Array.from(url.searchParams.values()));
+  } catch {
+    // Pasted coordinates do not need to be a URL.
+  }
+
+  for (const candidate of candidates) {
+    const matches = [
+      candidate.match(/@([+-]?\d+(?:\.\d+)?),\s*([+-]?\d+(?:\.\d+)?)/),
+      candidate.match(/!3d([+-]?\d+(?:\.\d+)?)!4d([+-]?\d+(?:\.\d+)?)/),
+      candidate.match(/([+-]?\d{1,2}(?:\.\d+)?)\s*[,，]\s*([+-]?\d{1,3}(?:\.\d+)?)/),
+    ];
+    for (const match of matches) {
+      if (!match) continue;
+      const latitude = Number(match[1]);
+      const longitude = Number(match[2]);
+      if (latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180) {
+        return { latitude, longitude };
+      }
+    }
+  }
+  return null;
+}
+
 export default function AdminDashboardPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>('appointments');
@@ -159,8 +191,7 @@ export default function AdminDashboardPage() {
   const [hospitalName, setHospitalName] = useState('');
   const [newHospitalName, setNewHospitalName] = useState('');
   const [newHospitalAddress, setNewHospitalAddress] = useState('');
-  const [newHospitalLatitude, setNewHospitalLatitude] = useState('');
-  const [newHospitalLongitude, setNewHospitalLongitude] = useState('');
+  const [newHospitalLocation, setNewHospitalLocation] = useState('');
   const [hospitalNameEdits, setHospitalNameEdits] = useState<Record<string, string>>({});
   const [selectedSlotHospitalId, setSelectedSlotHospitalId] = useState('');
   const [slotCapacityEdits, setSlotCapacityEdits] = useState<Record<string, number>>({});
@@ -434,6 +465,11 @@ export default function AdminDashboardPage() {
 
   async function createHospital(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const coordinates = parseMapCoordinates(newHospitalLocation);
+    if (newHospitalLocation.trim() && !coordinates) {
+      setError('อ่านพิกัดจากข้อมูลที่วางไม่ได้ กรุณาวางลิงก์ Google Maps ที่มีพิกัด หรือกรอกในรูปแบบ ละติจูด, ลองจิจูด');
+      return;
+    }
     await performAction('new-hospital', async () => {
       const response = await fetch('/api/admin/hospitals', {
         method: 'POST',
@@ -441,15 +477,14 @@ export default function AdminDashboardPage() {
         body: JSON.stringify({
           name: newHospitalName,
           address: newHospitalAddress || undefined,
-          latitude: newHospitalLatitude ? Number(newHospitalLatitude) : undefined,
-          longitude: newHospitalLongitude ? Number(newHospitalLongitude) : undefined,
+          latitude: coordinates?.latitude,
+          longitude: coordinates?.longitude,
         }),
       });
       await readJson(response);
       setNewHospitalName('');
       setNewHospitalAddress('');
-      setNewHospitalLatitude('');
-      setNewHospitalLongitude('');
+      setNewHospitalLocation('');
     }, 'เพิ่มสถานพยาบาลแล้ว');
   }
 
@@ -558,6 +593,7 @@ export default function AdminDashboardPage() {
     record.vaccineCode,
     record.hospitalName
   ));
+  const parsedNewHospitalLocation = parseMapCoordinates(newHospitalLocation);
 
   return (
     <main className="min-h-screen bg-slate-100 text-slate-900">
@@ -740,40 +776,29 @@ export default function AdminDashboardPage() {
                     ที่อยู่ (ไม่บังคับ)
                     <input maxLength={500} value={newHospitalAddress} onChange={(event) => setNewHospitalAddress(event.target.value)} placeholder="ตำบล / อำเภอ / จังหวัด" className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal" />
                   </label>
-                  <div className="sm:col-span-2 lg:col-span-6">
-                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <p className="text-xs font-semibold text-slate-700">ปักหมุดตำแหน่งสถานพยาบาล (ไม่บังคับ)</p>
-                        <p className="mt-1 text-xs text-slate-500">คลิกบนแผนที่เพื่อวางหมุด หรือลากหมุดเพื่อปรับตำแหน่ง</p>
-                      </div>
-                      {newHospitalLatitude && newHospitalLongitude && (
-                        <div className="flex items-center gap-3">
-                          <span className="text-xs text-teal-800">
-                            {Number(newHospitalLatitude).toFixed(5)}, {Number(newHospitalLongitude).toFixed(5)}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setNewHospitalLatitude('');
-                              setNewHospitalLongitude('');
-                            }}
-                            className="text-xs font-semibold text-rose-700 hover:underline"
-                          >
-                            ล้างหมุด
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                    <HospitalLocationPicker
-                      latitude={newHospitalLatitude ? Number(newHospitalLatitude) : null}
-                      longitude={newHospitalLongitude ? Number(newHospitalLongitude) : null}
-                      onChange={(latitude, longitude) => {
-                        setNewHospitalLatitude(latitude.toFixed(6));
-                        setNewHospitalLongitude(longitude.toFixed(6));
-                      }}
+                  <label className="text-xs font-semibold text-slate-700 sm:col-span-2 lg:col-span-6">
+                    ลิงก์ Google Maps หรือพิกัด (ไม่บังคับ)
+                    <textarea
+                      rows={2}
+                      value={newHospitalLocation}
+                      onChange={(event) => setNewHospitalLocation(event.target.value)}
+                      placeholder="วางลิงก์ Google Maps หรือพิกัด เช่น 13.7563, 100.5018"
+                      className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal"
                     />
-                    <p className="mt-2 text-xs text-slate-500">หากไม่ปักหมุด ผู้ใช้ยังค้นหาสถานพยาบาลนี้จากชื่อได้ แต่จะไม่ปรากฏในผลค้นหาใกล้เคียงด้วย GPS</p>
-                  </div>
+                    {newHospitalLocation.trim() && parsedNewHospitalLocation ? (
+                      <span className="mt-1 block font-normal text-teal-700">
+                        อ่านพิกัดได้: {parsedNewHospitalLocation.latitude.toFixed(6)}, {parsedNewHospitalLocation.longitude.toFixed(6)}
+                      </span>
+                    ) : newHospitalLocation.trim() ? (
+                      <span className="mt-1 block font-normal text-rose-700">
+                        ยังอ่านพิกัดไม่ได้ ลองวางลิงก์ Google Maps แบบเต็ม หรือใส่เป็น ละติจูด, ลองจิจูด
+                      </span>
+                    ) : (
+                      <span className="mt-1 block font-normal text-slate-500">
+                        คัดลอกลิงก์จาก Google Maps มาวางได้เลย หรือเว้นว่างไว้หากยังไม่มีพิกัด
+                      </span>
+                    )}
+                  </label>
                   <div className="flex items-end sm:col-span-2 lg:col-span-6">
                     <button disabled={busyKey === 'new-hospital'} className="w-full rounded-lg bg-teal-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-teal-800 disabled:opacity-50">
                       {busyKey === 'new-hospital' ? 'กำลังบันทึก...' : '＋ เพิ่มสถานพยาบาล'}
