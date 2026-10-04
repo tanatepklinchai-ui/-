@@ -723,6 +723,63 @@ export default function AdminDashboardPage() {
 
           {activeTab === 'slots' && (
             <div className="space-y-6">
+              <section className="overflow-hidden rounded-2xl border-2 border-teal-200 bg-white shadow-sm">
+                <div className="border-b border-teal-100 bg-teal-50 px-5 py-4">
+                  <p className="text-xs font-bold uppercase tracking-wide text-teal-700">จัดการสถานพยาบาล</p>
+                  <h2 className="mt-1 text-xl font-extrabold text-slate-900">เพิ่มหรือแก้ไขรายชื่อสถานพยาบาล</h2>
+                  <p className="mt-1 text-sm text-slate-600">อยู่ด้านบนสุดของหน้านี้ · {hospitals.length} แห่ง</p>
+                </div>
+                <form onSubmit={(event) => void createHospital(event)} className="grid grid-cols-1 gap-3 border-b border-slate-100 bg-slate-50 p-4 sm:grid-cols-2 lg:grid-cols-6">
+                  <label className="text-xs font-semibold text-slate-700 sm:col-span-2 lg:col-span-2">
+                    ชื่อสถานพยาบาลใหม่
+                    <input required maxLength={200} value={newHospitalName} onChange={(event) => setNewHospitalName(event.target.value)} placeholder="เช่น รพ.สต.บ้าน..." className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal" />
+                  </label>
+                  <label className="text-xs font-semibold text-slate-700 sm:col-span-2 lg:col-span-2">
+                    ที่อยู่ (ไม่บังคับ)
+                    <input maxLength={500} value={newHospitalAddress} onChange={(event) => setNewHospitalAddress(event.target.value)} placeholder="ตำบล / อำเภอ / จังหวัด" className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal" />
+                  </label>
+                  <label className="text-xs font-semibold text-slate-700">
+                    ละติจูด (ไม่บังคับ)
+                    <input type="number" step="any" min={-90} max={90} value={newHospitalLatitude} onChange={(event) => setNewHospitalLatitude(event.target.value)} placeholder="เช่น 15.1389" className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal" />
+                  </label>
+                  <label className="text-xs font-semibold text-slate-700">
+                    ลองจิจูด (ไม่บังคับ)
+                    <input type="number" step="any" min={-180} max={180} value={newHospitalLongitude} onChange={(event) => setNewHospitalLongitude(event.target.value)} placeholder="เช่น 100.2755" className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal" />
+                  </label>
+                  <p className="text-xs text-slate-500 sm:col-span-2 lg:col-span-4">ใส่พิกัดทั้งสองช่องเพื่อให้ผู้ใช้ค้นหาสถานพยาบาลนี้จากตำแหน่ง GPS ได้ หากยังไม่มีพิกัด ผู้ใช้ยังค้นหาจากชื่อได้</p>
+                  <div className="flex items-end lg:col-span-2">
+                    <button disabled={busyKey === 'new-hospital'} className="w-full rounded-lg bg-teal-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-teal-800 disabled:opacity-50">
+                      {busyKey === 'new-hospital' ? 'กำลังบันทึก...' : '＋ เพิ่มสถานพยาบาล'}
+                    </button>
+                  </div>
+                </form>
+                <ul className="divide-y divide-slate-100">
+                  {filteredHospitals.length === 0 ? <li className="p-5 text-sm text-slate-500">{hospitals.length ? 'ไม่พบสถานพยาบาลที่ตรงกับคำค้นหา' : 'ยังไม่มีรายชื่อสถานพยาบาล'}</li> : filteredHospitals.map((hospital) => (
+                    <li key={hospital.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
+                      <input
+                        aria-label={`ชื่อสถานพยาบาล ${hospital.name}`}
+                        value={hospitalNameEdits[hospital.id] ?? hospital.name}
+                        onChange={(event) => setHospitalNameEdits((current) => ({ ...current, [hospital.id]: event.target.value }))}
+                        className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                      />
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          disabled={busyKey === `hospital-${hospital.id}` || !(hospitalNameEdits[hospital.id] ?? hospital.name).trim()}
+                          onClick={() => void updateHospital(hospital.id, { name: hospitalNameEdits[hospital.id] ?? hospital.name })}
+                          className="rounded-lg bg-teal-50 px-3 py-2 text-xs font-bold text-teal-700 disabled:opacity-50"
+                        >บันทึกชื่อ</button>
+                        <button
+                          disabled={busyKey === `hospital-${hospital.id}`}
+                          onClick={() => void updateHospital(hospital.id, { isActive: !hospital.isActive })}
+                          className={`rounded-lg px-3 py-2 text-xs font-bold ${hospital.isActive ? 'bg-amber-50 text-amber-800' : 'bg-emerald-50 text-emerald-700'}`}
+                        >{hospital.isActive ? 'ปิดรับจอง' : 'เปิดรับจอง'}</button>
+                        <button disabled={busyKey === `hospital-${hospital.id}`} onClick={() => void deleteHospital(hospital)} className="rounded-lg bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50">ลบชื่อ</button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+
               <section className="rounded-2xl border border-teal-100 bg-white p-5 shadow-sm sm:p-6">
                 <div className="max-w-2xl">
                   <p className="text-xs font-bold uppercase tracking-wide text-teal-700">ขั้นตอนที่ 1</p>
@@ -860,62 +917,6 @@ export default function AdminDashboardPage() {
                 )}
               </section>
 
-              <details open className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 p-5 font-bold text-slate-800">
-                  <span>จัดการรายชื่อและข้อมูลสถานพยาบาล ({hospitals.length} แห่ง)</span>
-                  <span className="text-sm font-normal text-slate-500 group-open:hidden">แสดงตัวเลือก</span>
-                  <span className="hidden text-sm font-normal text-slate-500 group-open:inline">ซ่อนตัวเลือก</span>
-                </summary>
-                <form onSubmit={(event) => void createHospital(event)} className="grid grid-cols-1 gap-3 border-t border-slate-100 bg-slate-50 p-4 sm:grid-cols-2 lg:grid-cols-6">
-                  <label className="text-xs font-semibold text-slate-700 sm:col-span-2 lg:col-span-2">
-                    ชื่อสถานพยาบาลใหม่
-                    <input required maxLength={200} value={newHospitalName} onChange={(event) => setNewHospitalName(event.target.value)} placeholder="เช่น รพ.สต.บ้าน..." className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal" />
-                  </label>
-                  <label className="text-xs font-semibold text-slate-700 sm:col-span-2 lg:col-span-2">
-                    ที่อยู่ (ไม่บังคับ)
-                    <input maxLength={500} value={newHospitalAddress} onChange={(event) => setNewHospitalAddress(event.target.value)} placeholder="ตำบล / อำเภอ / จังหวัด" className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal" />
-                  </label>
-                  <label className="text-xs font-semibold text-slate-700">
-                    ละติจูด (ไม่บังคับ)
-                    <input type="number" step="any" min={-90} max={90} value={newHospitalLatitude} onChange={(event) => setNewHospitalLatitude(event.target.value)} placeholder="เช่น 15.1389" className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal" />
-                  </label>
-                  <label className="text-xs font-semibold text-slate-700">
-                    ลองจิจูด (ไม่บังคับ)
-                    <input type="number" step="any" min={-180} max={180} value={newHospitalLongitude} onChange={(event) => setNewHospitalLongitude(event.target.value)} placeholder="เช่น 100.2755" className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm font-normal" />
-                  </label>
-                  <p className="text-xs text-slate-500 sm:col-span-2 lg:col-span-4">ใส่พิกัดทั้งสองช่องเพื่อให้ผู้ใช้ค้นหาสถานพยาบาลนี้จากตำแหน่ง GPS ได้ หากยังไม่มีพิกัด ผู้ใช้ยังค้นหาจากชื่อได้</p>
-                  <div className="flex items-end lg:col-span-2">
-                    <button disabled={busyKey === 'new-hospital'} className="w-full rounded-lg bg-teal-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-teal-800 disabled:opacity-50">
-                      {busyKey === 'new-hospital' ? 'กำลังบันทึก...' : '＋ เพิ่มสถานพยาบาล'}
-                    </button>
-                  </div>
-                </form>
-                <ul className="divide-y divide-slate-100 border-t border-slate-100">
-                  {filteredHospitals.length === 0 ? <li className="p-5 text-sm text-slate-500">{hospitals.length ? 'ไม่พบสถานพยาบาลที่ตรงกับคำค้นหา' : 'ยังไม่มีรายชื่อสถานพยาบาล'}</li> : filteredHospitals.map((hospital) => (
-                    <li key={hospital.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
-                      <input
-                        aria-label={`ชื่อสถานพยาบาล ${hospital.name}`}
-                        value={hospitalNameEdits[hospital.id] ?? hospital.name}
-                        onChange={(event) => setHospitalNameEdits((current) => ({ ...current, [hospital.id]: event.target.value }))}
-                        className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                      />
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          disabled={busyKey === `hospital-${hospital.id}` || !(hospitalNameEdits[hospital.id] ?? hospital.name).trim()}
-                          onClick={() => void updateHospital(hospital.id, { name: hospitalNameEdits[hospital.id] ?? hospital.name })}
-                          className="rounded-lg bg-teal-50 px-3 py-2 text-xs font-bold text-teal-700 disabled:opacity-50"
-                        >บันทึกชื่อ</button>
-                        <button
-                          disabled={busyKey === `hospital-${hospital.id}`}
-                          onClick={() => void updateHospital(hospital.id, { isActive: !hospital.isActive })}
-                          className={`rounded-lg px-3 py-2 text-xs font-bold ${hospital.isActive ? 'bg-amber-50 text-amber-800' : 'bg-emerald-50 text-emerald-700'}`}
-                        >{hospital.isActive ? 'ปิดรับจอง' : 'เปิดรับจอง'}</button>
-                        <button disabled={busyKey === `hospital-${hospital.id}`} onClick={() => void deleteHospital(hospital)} className="rounded-lg bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50">ลบชื่อ</button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </details>
             </div>
           )}
 
