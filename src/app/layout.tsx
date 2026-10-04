@@ -13,9 +13,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "พร้อมฉีด (PromChid) - ระบบบริหารและนัดหมายวัคซีน",
-  description: "ระบบบันทึก ตารางนัดหมาย และแจ้งเตือนการรับวัคซีนสำหรับเด็ก",
-  // 👉 เพิ่มบรรทัด verification ตรงนี้
+  title: "พร้อมฉีด (Prom Chid) - ระบบติดตามการฉีดวัคซีน",
+  description:
+    "พร้อมฉีดช่วยบันทึกและติดตามประวัติการฉีดวัคซีนเด็ก จัดการนัดหมายกับโรงพยาบาล และรับการแจ้งเตือนวันนัดได้สะดวก",
+  keywords: ["พร้อมฉีด", "Prom Chid", "วัคซีนเด็ก", "นัดหมายวัคซีน", "แจ้งเตือนวัคซีน"],
   verification: {
     google: "DA03QkBA3A2V76dR_KEcIz3vQFpD3LNHvPoDVT1QFHg",
   },
