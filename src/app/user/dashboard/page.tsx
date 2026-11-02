@@ -1,7 +1,7 @@
 // src/app/user/dashboard/page.tsx
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { VACCINE_SCHEDULE } from '@/lib/vaccineSchedule';
 import { calculateAgeDisplay } from '@/lib/utils/formatAge';
@@ -102,6 +102,12 @@ export default function ColorfulDashboard() {
   // States: Appointments & Hospitals
   const [isLocating, setIsLocating] = useState(false);
   const [hospitalSearchQuery, setHospitalSearchQuery] = useState('');
+  const [hospitalSearchMode, setHospitalSearchMode] = useState<'directory' | 'text' | 'nearby'>('directory');
+  const [hospitalSearchStatus, setHospitalSearchStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [hospitalSearchError, setHospitalSearchError] = useState('');
+  const [hospitalSearchNotice, setHospitalSearchNotice] = useState('');
+  const [hospitalSearchRetry, setHospitalSearchRetry] = useState(0);
+  const hospitalSearchRequestRef = useRef(0);
   const [selectedHospital, setSelectedHospital] = useState<string | null>(null);
   const [bookingDateTime, setBookingDateTime] = useState('');
   const [selectedBookingDate, setSelectedBookingDate] = useState('');
@@ -139,20 +145,51 @@ export default function ColorfulDashboard() {
     setToast({ type, title, description });
   };
   
-  // ฟังก์ชันค้นหาโรงพยาบาลจากข้อความ
-  const handleSearchHospitals = async (keyword: string) => {
-    setHospitalSearchQuery(keyword);
-    if (keyword.length > 2) {
+  useEffect(() => {
+    if (activeTab !== 'appointments' || hospitalSearchMode === 'nearby') return;
+
+    const controller = new AbortController();
+    const searchTerm = hospitalSearchQuery.trim();
+    const useTextSearch = hospitalSearchMode === 'text' && searchTerm.length >= 2;
+    const searchUrl = useTextSearch
+      ? `/api/hospitals?search=${encodeURIComponent(searchTerm)}`
+      : '/api/hospitals?directory=1';
+
+    const loadHospitals = async () => {
+      setHospitalSearchStatus('loading');
+      setHospitalSearchError('');
       try {
-        const res = await fetch(`/api/hospitals?search=${encodeURIComponent(keyword)}`);
-        const data = await res.json();
-        if (res.ok) setRealHospitals(data.hospitals ?? []);
-      } catch (err) {
-        console.error('Search failed', err);
+        const response = await fetch(searchUrl, { signal: controller.signal });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'ไม่สามารถโหลดรายชื่อสถานพยาบาลได้');
+        setRealHospitals(data.hospitals ?? []);
+        setHospitalSearchStatus('success');
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setHospitalSearchError(error instanceof Error ? error.message : 'กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองอีกครั้ง');
+        setHospitalSearchStatus('error');
       }
-    } else if (keyword.length === 0) {
-      setRealHospitals([]);
-    }
+    };
+
+    const timeoutId = window.setTimeout(() => void loadHospitals(), useTextSearch ? 350 : 0);
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [activeTab, hospitalSearchMode, hospitalSearchQuery, hospitalSearchRetry]);
+
+  const handleSearchHospitals = (keyword: string) => {
+    hospitalSearchRequestRef.current += 1;
+    setIsLocating(false);
+    setHospitalSearchStatus('loading');
+    setHospitalSearchError('');
+    setHospitalSearchQuery(keyword);
+    setHospitalSearchMode(keyword.trim() ? 'text' : 'directory');
+    setHospitalSearchNotice('');
+    setRealHospitals([]);
+    setSelectedHospital(null);
+    setBookingDateTime('');
+    setSelectedBookingDate('');
   };
 
   useEffect(() => {
@@ -219,23 +256,48 @@ export default function ColorfulDashboard() {
   useEffect(() => {
     if (!selectedChildId) return;
     const controller = new AbortController();
+    let isFetching = false;
+    let isInitialFetch = true;
     const loadVaccineRecords = async () => {
-      setVaccineLoading(true);
+      if (isFetching || controller.signal.aborted) return;
+      isFetching = true;
+      if (isInitialFetch) setVaccineLoading(true);
       try {
-        const response = await fetch(`/api/vaccines/records?childId=${encodeURIComponent(selectedChildId)}`, { signal: controller.signal });
+        const response = await fetch(`/api/vaccines/records?childId=${encodeURIComponent(selectedChildId)}`, {
+          cache: 'no-store',
+          signal: controller.signal,
+        });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'ไม่สามารถโหลดประวัติวัคซีนได้');
         setVaccineRecords(data.records ?? []);
+        setVaccineError('');
       } catch (error) {
         if (!controller.signal.aborted) {
           setVaccineError(error instanceof Error ? error.message : 'ไม่สามารถโหลดประวัติวัคซีนได้');
         }
       } finally {
-        if (!controller.signal.aborted) setVaccineLoading(false);
+        isFetching = false;
+        if (!controller.signal.aborted && isInitialFetch) {
+          isInitialFetch = false;
+          setVaccineLoading(false);
+        }
       }
     };
     void loadVaccineRecords();
-    return () => controller.abort();
+    const intervalId = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void loadVaccineRecords();
+    }, 15_000);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') void loadVaccineRecords();
+    };
+    window.addEventListener('focus', handleVisibilityChange);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      controller.abort();
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', handleVisibilityChange);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [selectedChildId]);
 
   const vaccineRows = childProfile?.dob
@@ -384,55 +446,73 @@ export default function ColorfulDashboard() {
     }
   };
     
-   const handleFindNearby = () => {
+  const handleFindNearby = () => {
+    const requestId = hospitalSearchRequestRef.current + 1;
+    hospitalSearchRequestRef.current = requestId;
     setIsLocating(true);
-    setHospitalSearchQuery(''); // เคลียร์ช่องค้นหาถ้าใช้ GPS
-    if (!navigator.geolocation) {
-      notify('error', 'อุปกรณ์นี้ไม่รองรับ GPS', 'ลองค้นหาสถานพยาบาลจากอุปกรณ์ที่เปิดใช้ตำแหน่งได้');
+    setHospitalSearchStatus('loading');
+    setHospitalSearchQuery('');
+    setHospitalSearchMode('directory');
+    setHospitalSearchError('');
+    setHospitalSearchNotice('');
+    if (hospitalSearchMode !== 'directory') setRealHospitals([]);
+    setSelectedHospital(null);
+    setBookingDateTime('');
+    setSelectedBookingDate('');
+
+    const showDirectoryFallback = (notice: string) => {
+      if (hospitalSearchRequestRef.current !== requestId) return;
       setIsLocating(false);
+      setHospitalSearchMode('directory');
+      setHospitalSearchNotice(notice);
+      setHospitalSearchRetry((current) => current + 1);
+    };
+
+    if (!navigator.geolocation) {
+      showDirectoryFallback('อุปกรณ์นี้ไม่รองรับการระบุตำแหน่ง แต่ยังเลือกจากรายชื่อหรือค้นหาด้วยชื่อได้');
       return;
     }
 
-    // 👉 1. แจ้งเตือนผู้ใช้ก่อนว่าระบบกำลังจะขอสิทธิ์ GPS
-    notify('info', '📍 กำลังระบุตำแหน่งของคุณ', 'กรุณากด "อนุญาต (Allow)" ให้เว็บเข้าถึงตำแหน่ง');
-
     navigator.geolocation.getCurrentPosition(
       async (position) => {
+        if (hospitalSearchRequestRef.current !== requestId) return;
+        setHospitalSearchStatus('loading');
         try {
           const { latitude, longitude } = position.coords;
           const res = await fetch(`/api/hospitals?lat=${latitude}&lng=${longitude}`);
           const data = await res.json();
           if (!res.ok) throw new Error(data.error || 'ค้นหาสถานพยาบาลไม่สำเร็จ');
+          if (hospitalSearchRequestRef.current !== requestId) return;
           
           const hospitals = data.hospitals ?? [];
-          setRealHospitals(hospitals);
-          setSelectedHospital(null);
-          setBookingDateTime('');
-          setSelectedBookingDate('');
-
-          // 👉 2. แจ้งเตือนเมื่อดึงข้อมูลเสร็จแล้ว
-          if (hospitals.length > 0) {
-            notify('success', 'ค้นพบสถานพยาบาลแล้ว', `แสดงผล ${hospitals.length} แห่งในบริเวณใกล้เคียง`);
-          } else {
-            notify('warning', 'ไม่มีสถานพยาบาลใกล้เคียง', 'ไม่พบสถานพยาบาลในรัศมีที่ค้นหา');
+          if (hospitals.length === 0) {
+            showDirectoryFallback('ยังไม่พบจุดบริการจากตำแหน่งนี้ กำลังแสดงรายชื่อสถานพยาบาลที่ค้นหาได้แทน');
+            return;
           }
 
+          setHospitalSearchMode('nearby');
+          setRealHospitals(hospitals);
+          setHospitalSearchStatus('success');
+          setHospitalSearchNotice(`พบสถานพยาบาลใกล้ตำแหน่งของคุณ ${hospitals.length} แห่ง`);
         } catch (error) {
-          notify('error', 'ค้นหาสถานพยาบาลไม่สำเร็จ', error instanceof Error ? error.message : 'กรุณาลองใหม่อีกครั้ง');
+          const detail = error instanceof Error ? error.message : '';
+          showDirectoryFallback(
+            `การค้นหาใกล้ตำแหน่งใช้เวลานานหรือแผนที่ตอบกลับไม่สำเร็จ${detail ? ` (${detail})` : ''} รายชื่อด้านล่างยังเลือกได้ หรือค้นหาด้วยชื่อ`
+          );
         } finally {
-          setIsLocating(false);
+          if (hospitalSearchRequestRef.current === requestId) setIsLocating(false);
         }
       },
       (error) => {
+        if (hospitalSearchRequestRef.current !== requestId) return;
         const description = error.code === error.PERMISSION_DENIED
-          ? 'คุณไม่ได้อนุญาตการเข้าถึงตำแหน่ง กรุณาเปิดสิทธิ์ในการตั้งค่าเบราว์เซอร์'
+          ? 'ไม่ได้อนุญาตการเข้าถึงตำแหน่ง รายชื่อสถานพยาบาลยังใช้งานได้โดยไม่ต้องเปิดตำแหน่ง'
           : error.code === error.TIMEOUT
-            ? 'การค้นหาตำแหน่งใช้เวลานานเกินไป กรุณาลองอีกครั้ง'
-            : 'ตรวจสอบการตั้งค่าตำแหน่งของอุปกรณ์แล้วลองใหม่';
-        notify('error', 'ระบุตำแหน่งไม่ได้', description);
-        setIsLocating(false);
+            ? 'ระบุตำแหน่งใช้เวลานานเกินไป กำลังแสดงรายชื่อให้เลือกแทน'
+            : 'ยังระบุตำแหน่งไม่ได้ แต่ค้นหาสถานพยาบาลจากชื่อหรือรายการด้านล่างได้';
+        showDirectoryFallback(description);
       },
-      { enableHighAccuracy: true, timeout: 10000 } // 👉 3. เพิ่ม timeout ป้องกันการค้างถ้าระบบหา GPS ไม่เจอ
+      { enableHighAccuracy: false, timeout: 20_000, maximumAge: 60_000 }
     );
   };
   const handleBooking = async () => {
@@ -1056,12 +1136,57 @@ export default function ColorfulDashboard() {
                   </button>
                 </div>
 
-                {realHospitals.length === 0 ? (
-                  <div className="text-center py-12 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
-                    <div className="text-4xl mb-3">🏥</div>
-                    <p className="text-slate-600 font-bold text-sm">ยังไม่ได้เลือกสถานพยาบาล</p>
-                    <p className="text-slate-400 text-xs mt-1">พิมพ์ชื่อสถานพยาบาล หรือค้นหาด้วย GPS แล้วเลือกวันและเวลาที่ต้องการเอง</p>
+                <p className="mb-4 text-xs text-slate-500">
+                  เลือกจากรายชื่อหรือพิมพ์ค้นหาได้เลย ไม่จำเป็นต้องเปิดตำแหน่ง การค้นหาใกล้ฉันเป็นตัวเลือกเพิ่มเติม
+                </p>
+                {hospitalSearchNotice && (
+                  <p role="status" className="mb-4 rounded-xl border border-sky-100 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+                    📍 {hospitalSearchNotice}
+                  </p>
+                )}
+                {hospitalSearchMode === 'text' && hospitalSearchQuery.trim().length === 1 && (
+                  <p className="mb-4 text-xs text-slate-500">พิมพ์เพิ่มอีกอย่างน้อย 1 ตัวอักษรเพื่อค้นหา หรือเลือกจากรายชื่อทั้งหมดด้านล่าง</p>
+                )}
+                {hospitalSearchStatus === 'loading' && (
+                  <p role="status" className="mb-4 flex items-center gap-2 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-rose-500" />
+                    {isLocating
+                      ? 'กำลังค้นหาใกล้ตำแหน่งของคุณ รายชื่อสถานพยาบาลยังใช้งานได้ระหว่างรอ'
+                      : 'กำลังค้นหารายชื่อสถานพยาบาล กรุณารอสักครู่'}
+                  </p>
+                )}
+                {hospitalSearchStatus === 'error' && (
+                  <div role="alert" className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    <p className="font-bold">ยังโหลดผลค้นหาไม่สำเร็จ อาจเป็นเพราะการเชื่อมต่อใช้เวลานาน</p>
+                    <p className="mt-1">ไม่ได้หมายความว่าไม่มีสถานพยาบาล ลองค้นหาอีกครั้งหรือค้นหาด้วยชื่อได้</p>
+                    {hospitalSearchError && <p className="mt-1 text-xs">{hospitalSearchError}</p>}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHospitalSearchStatus('loading');
+                        setHospitalSearchRetry((current) => current + 1);
+                      }}
+                      className="mt-2 font-bold underline underline-offset-2"
+                    >
+                      ลองโหลดรายชื่ออีกครั้ง
+                    </button>
                   </div>
+                )}
+
+                {realHospitals.length === 0 ? (
+                  hospitalSearchStatus !== 'success' ? null : (
+                    <div className="text-center py-12 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
+                      <div className="text-4xl mb-3">🏥</div>
+                      <p className="text-slate-600 font-bold text-sm">
+                        {hospitalSearchMode === 'text' && hospitalSearchQuery.trim().length >= 2
+                          ? `ยังไม่พบรายชื่อที่ตรงกับ “${hospitalSearchQuery.trim()}”`
+                          : 'ขณะนี้ยังไม่มีรายชื่อสถานพยาบาลให้เลือก'}
+                      </p>
+                      <p className="text-slate-500 text-xs mt-2">
+                        ลองใช้คำค้นหาที่สั้นลง หรือค้นหาใกล้ฉันเพื่อดูสถานพยาบาลรอบตำแหน่งของคุณ
+                      </p>
+                    </div>
+                  )
                 ) : (
                   <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
                     {realHospitals.map((hospital) => (
@@ -1069,6 +1194,13 @@ export default function ColorfulDashboard() {
                         key={hospital.id}
                         className={`border-2 rounded-2xl p-5 transition-all cursor-pointer ${selectedHospital === hospital.id ? 'border-rose-400 bg-rose-50/40 shadow-md' : 'border-slate-100 bg-white hover:border-rose-200'}`}
                         onClick={() => {
+                          if (isLocating) {
+                            hospitalSearchRequestRef.current += 1;
+                            setIsLocating(false);
+                            setHospitalSearchMode('directory');
+                            setHospitalSearchStatus('success');
+                            setHospitalSearchNotice('เลือกจากรายชื่อได้เลย โดยไม่ต้องรอการค้นหาใกล้ตำแหน่ง');
+                          }
                           if (selectedHospital !== hospital.id) {
                             setBookingDateTime('');
                             setSelectedBookingDate('');

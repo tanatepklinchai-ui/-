@@ -86,11 +86,12 @@ function readCoordinate(value: string | null, fallback: number, min: number, max
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const searchQuery = searchParams.get('search');
+  const isDirectoryRequest = searchParams.get('directory') === '1';
   const latitude = readCoordinate(searchParams.get('lat'), DEFAULT_LATITUDE, -90, 90);
   const longitude = readCoordinate(searchParams.get('lng'), DEFAULT_LONGITUDE, -180, 180);
 
   // ตรวจสอบพารามิเตอร์ (ต้องมีอย่างใดอย่างหนึ่ง: คำค้นหา หรือ พิกัด)
-  if (!searchQuery && (latitude === null || longitude === null)) {
+  if (!searchQuery && !isDirectoryRequest && (latitude === null || longitude === null)) {
     return NextResponse.json({ error: 'พิกัดหรือคำค้นหาไม่ถูกต้อง' }, { status: 400 });
   }
 
@@ -98,25 +99,28 @@ export async function GET(req: Request) {
   const bangkokToday = getBangkokToday();
 
   try {
-    if (searchQuery) {
-      // โหมดที่ 1: ค้นหาจากข้อความ (พิมพ์ชื่อ)
+    if (searchQuery || isDirectoryRequest) {
+      // ค้นจากรายชื่อในระบบได้โดยไม่ต้องพึ่ง GPS หรือบริการแผนที่ภายนอก
       const dbHospitals = await prisma.hospital.findMany({
         where: {
           isActive: true,
-          name: {
-            contains: searchQuery,
-            mode: 'insensitive' // ค้นหาแบบไม่สนใจตัวพิมพ์เล็ก/ใหญ่ (สำหรับ PostgreSQL)
-          }
+          ...(searchQuery ? {
+            name: {
+              contains: searchQuery,
+              mode: 'insensitive' // ค้นหาแบบไม่สนใจตัวพิมพ์เล็ก/ใหญ่ (สำหรับ PostgreSQL)
+            }
+          } : {}),
         },
-        take: 20
+        take: searchQuery ? 20 : 100,
+        orderBy: { name: 'asc' },
       });
 
       mappedHospitals = dbHospitals.map(h => {
-        let distanceVal = 99999;
+        let distanceVal = Number.MAX_SAFE_INTEGER;
         let distanceStr = '';
         
-        // คำนวณระยะห่าง ถ้ามีพิกัดปัจจุบันส่งมาด้วย
-        if (latitude !== null && longitude !== null && h.latitude !== null && h.longitude !== null) {
+        // คำนวณระยะทางเฉพาะเมื่อผู้ใช้ส่งพิกัดมาเอง
+        if (searchParams.has('lat') && searchParams.has('lng') && latitude !== null && longitude !== null && h.latitude !== null && h.longitude !== null) {
            distanceVal = getDistance(latitude, longitude, h.latitude, h.longitude);
            distanceStr = formatDistance(distanceVal);
         }
