@@ -28,6 +28,7 @@ export async function POST(req: Request) {
       id: user.id,
       role: user.role,
       email: user.email,
+      sessionVersion: user.sessionVersion,
     });
 
     return NextResponse.json({

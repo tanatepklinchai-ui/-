@@ -66,11 +66,13 @@ export default function RegisterPage() {
         {/* ฟอร์มสมัครสมาชิก */}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
+            <label htmlFor="register-email" className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
               อีเมล
             </label>
             <input
+              id="register-email"
               type="email"
+              autoComplete="email"
               required
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
@@ -80,11 +82,13 @@ export default function RegisterPage() {
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
+            <label htmlFor="register-username" className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
               ชื่อผู้ใช้ (Username)
             </label>
             <input
+              id="register-username"
               type="text"
+              autoComplete="username"
               required
               value={form.username}
               onChange={(e) => setForm({ ...form, username: e.target.value })}
@@ -94,11 +98,13 @@ export default function RegisterPage() {
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
+            <label htmlFor="register-password" className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
               รหัสผ่าน
             </label>
             <input
+              id="register-password"
               type="password"
+              autoComplete="new-password"
               required
               value={form.password}
               onChange={(e) => setForm({ ...form, password: e.target.value })}
@@ -108,11 +114,13 @@ export default function RegisterPage() {
           </div>
 
           <div className="animate-fade-in-up">
-            <label className="block text-xs font-bold text-amber-600 uppercase tracking-wider mb-2">
+            <label htmlFor="register-admin-code" className="block text-xs font-bold text-amber-600 uppercase tracking-wider mb-2">
               รหัสผู้ดูแลระบบ (ถ้ามี)
             </label>
             <input
+              id="register-admin-code"
               type="password"
+              autoComplete="off"
               value={form.adminCode}
               onChange={(e) => setForm({ ...form, adminCode: e.target.value })}
               className="w-full px-5 py-3.5 rounded-2xl border-2 border-amber-200 bg-amber-50/50 text-slate-800 text-sm font-medium placeholder:text-amber-300 focus:outline-none focus:border-amber-400 focus:ring-4 focus:ring-amber-100/50 transition-all"
@@ -143,6 +151,9 @@ export default function RegisterPage() {
           <Link href="/login" className="text-teal-600 font-bold hover:text-teal-700 hover:underline underline-offset-2 transition-all">
             เข้าสู่ระบบ
           </Link>
+        </p>
+        <p className="mt-4 text-center text-xs text-slate-500">
+          การสมัครใช้งานเป็นไปตาม<Link href="/privacy" className="ml-1 font-semibold text-teal-700 hover:underline">ประกาศความเป็นส่วนตัว</Link>
         </p>
       </div>
     </div>

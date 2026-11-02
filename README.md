@@ -44,7 +44,11 @@ Generate a VAPID key pair for Web Push with `npx web-push generate-vapid-keys` a
 
 Email notifications use Resend when `RESEND_API_KEY` is configured; set `EMAIL_FROM` to a sender verified with Resend. Gmail can be used instead by setting both `GMAIL_USER` and `GMAIL_APP_PASSWORD`. Users can enable browser notifications in **ตั้งค่าการแจ้งเตือน**; admins can send an appointment notification from the appointment list, and rescheduling sends an update automatically. Set `NEXTAUTH_URL` to the public application URL in production so email links open the correct site.
 
-Users choose their preferred date and time when requesting an appointment. Requests wait for admin approval and do not require an admin-created availability slot. Admin-managed slots remain available for capacity tracking and waitlist operations.
+Password recovery uses the configured email provider and `NEXTAUTH_URL`. Apply the password reset migration with `npx prisma migrate deploy` before deploying. Reset links expire after 30 minutes, can only be used once, and invalidate existing sessions.
+
+The **ประกาศความเป็นส่วนตัว** page describes the service data use and provides the contact address for access, correction, and deletion requests. Verified deletion requests are handled within 90 days.
+
+Users choose their preferred date and time when requesting an appointment. Requests wait for admin approval and do not require an admin-created availability slot; the selected date and time are not confirmed until approval. Admin-managed slots remain available for capacity tracking and waitlist operations. The admin appointment queue is returned in pages of 100; use **โหลดนัดหมายเพิ่มเติม** to browse older entries.
 
 Configure the same `CRON_SECRET` in the production deployment environment. Vercel runs `/api/cron/process-queue` from `vercel.json` once per day at 16:00 UTC (23:00 Thailand time) so appointment reminders are processed late on each reminder date. Scheduled reminders will not run unless the project is deployed to Vercel production and its cron authorization secret is configured.
 

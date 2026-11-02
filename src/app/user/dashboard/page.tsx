@@ -998,6 +998,9 @@ export default function ColorfulDashboard() {
                 <div className="mb-6">
                   <h2 className="text-2xl font-extrabold text-rose-900">📅 นัดหมายรับวัคซีน</h2>
                   <p className="text-sm text-slate-500 mt-1">เลือกวัคซีนตามกำหนดของเด็ก ค้นหาสถานพยาบาล และเลือกรอบเวลาที่สะดวก</p>
+                  <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    วันและเวลาที่เลือกเป็นคำขอนัดหมายเท่านั้น คิวจะยังไม่ยืนยันจนกว่าเจ้าหน้าที่จะอนุมัติ โปรดรอการแจ้งผลก่อนเดินทาง
+                  </p>
 
                   {/* กล่อง Dropdown ที่เชื่อมกับข้อมูลตารางวัคซีน */}
                   <label className="mt-5 block text-sm font-bold text-slate-700">

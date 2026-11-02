@@ -12,9 +12,14 @@ function sign(value: string): string {
 }
 
 // 1. สั่งสร้างและฝัง Cookie ตอนล็อกอินสำเร็จ
-export async function setSession(user: { id: string; role: string; email: string }) {
+export async function setSession(user: { id: string; role: string; email: string; sessionVersion: number }) {
   const cookieStore = await Promise.resolve(cookies());
-  const payload = JSON.stringify({ id: user.id, role: user.role, email: user.email });
+  const payload = JSON.stringify({
+    id: user.id,
+    role: user.role,
+    email: user.email,
+    sessionVersion: user.sessionVersion,
+  });
   const signature = sign(payload);
   const sessionValue = Buffer.from(payload).toString('base64') + '.' + signature;
 
@@ -46,7 +51,28 @@ export async function getSession(): Promise<{ userId: string; role: string; emai
       return null;
     }
 
-    const data = JSON.parse(payload);
+    const data: unknown = JSON.parse(payload);
+    if (
+      typeof data !== 'object' ||
+      data === null ||
+      !('id' in data) ||
+      typeof data.id !== 'string' ||
+      !('role' in data) ||
+      typeof data.role !== 'string' ||
+      !('email' in data) ||
+      typeof data.email !== 'string' ||
+      !('sessionVersion' in data) ||
+      typeof data.sessionVersion !== 'number'
+    ) {
+      return null;
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: data.id },
+      select: { sessionVersion: true },
+    });
+    if (!user || user.sessionVersion !== data.sessionVersion) return null;
+
     return { userId: data.id, role: data.role, email: data.email };
   } catch {
     return null;

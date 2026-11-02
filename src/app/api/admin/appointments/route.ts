@@ -70,19 +70,31 @@ async function promoteWaitlistedAppointment(transaction: Prisma.TransactionClien
   return true;
 }
 
-export async function GET() {
+const APPOINTMENTS_PAGE_SIZE = 100;
+
+export async function GET(req: Request) {
   const session = await getAdminSession();
   if (!session) return NextResponse.json({ error: 'ไม่มีสิทธิ์เข้าถึงข้อมูลนี้' }, { status: 403 });
   try {
+    const cursor = new URL(req.url).searchParams.get('cursor');
+    if (cursor && !(await prisma.appointment.findUnique({ where: { id: cursor }, select: { id: true } }))) {
+      return NextResponse.json({ error: 'ไม่พบหน้ารายการนัดหมายที่ต้องการ' }, { status: 400 });
+    }
     const appointments = await prisma.appointment.findMany({
       include: {
         user: { select: { username: true, email: true } },
         child: { select: { firstName: true, lastName: true, dob: true } },
       },
-      orderBy: [{ scheduledAt: 'asc' }, { createdAt: 'asc' }],
-      take: 1000,
+      orderBy: [{ scheduledAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      take: APPOINTMENTS_PAGE_SIZE + 1,
     });
-    return NextResponse.json({ appointments });
+    const hasMore = appointments.length > APPOINTMENTS_PAGE_SIZE;
+    const pageAppointments = hasMore ? appointments.slice(0, APPOINTMENTS_PAGE_SIZE) : appointments;
+    return NextResponse.json({
+      appointments: pageAppointments,
+      nextCursor: hasMore ? pageAppointments[pageAppointments.length - 1].id : null,
+    });
   } catch {
     return NextResponse.json({ error: 'ไม่สามารถโหลดรายการนัดหมายได้' }, { status: 500 });
   }

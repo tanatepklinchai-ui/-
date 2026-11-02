@@ -72,11 +72,13 @@ export default function LoginPage() {
         {/* ฟอร์มเข้าสู่ระบบ */}
         <form onSubmit={handleLogin} className="space-y-5">
           <div>
-            <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
+            <label htmlFor="login-identifier" className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
               อีเมล หรือ ชื่อผู้ใช้
             </label>
             <input
+              id="login-identifier"
               type="text"
+              autoComplete="username"
               required
               value={identifier}
               onChange={(e) => setIdentifier(e.target.value)}
@@ -86,11 +88,13 @@ export default function LoginPage() {
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
+            <label htmlFor="login-password" className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">
               รหัสผ่าน
             </label>
             <input
+              id="login-password"
               type="password"
+              autoComplete="current-password"
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -117,11 +121,17 @@ export default function LoginPage() {
           </div>
         </form>
 
+        <p className="mt-4 text-right text-sm">
+          <Link href="/forgot-password" className="font-semibold text-teal-700 hover:underline">ลืมรหัสผ่าน?</Link>
+        </p>
         <p className="text-center text-sm text-slate-500 mt-8 font-medium">
           ยังไม่มีบัญชีใช่หรือไม่?{' '}
           <Link href="/register" className="text-teal-600 font-bold hover:text-teal-700 hover:underline underline-offset-2 transition-all">
             สมัครสมาชิก
           </Link>
+        </p>
+        <p className="mt-4 text-center text-xs text-slate-500">
+          <Link href="/privacy" className="hover:underline">ประกาศความเป็นส่วนตัว</Link>
         </p>
       </div>
     </div>

@@ -56,6 +56,7 @@ type Appointment = {
   status: string;
   isWaitlisted: boolean;
   requestedVaccine?: string | null; // <--- เพิ่มบรรทัดนี้
+  createdAt: string;
   user: { username: string; email: string };
   child: { firstName: string | null; lastName: string | null; dob: string | null };
 };
@@ -103,6 +104,16 @@ async function readJson<T>(response: Response): Promise<T> {
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || 'เกิดข้อผิดพลาด กรุณาลองใหม่');
   return data as T;
+}
+
+function mergeAppointments(current: Appointment[], updates: Appointment[]) {
+  const merged = new Map(current.map((appointment) => [appointment.id, appointment]));
+  updates.forEach((appointment) => merged.set(appointment.id, appointment));
+  return Array.from(merged.values()).sort((left, right) =>
+    right.scheduledAt.localeCompare(left.scheduledAt) ||
+    right.createdAt.localeCompare(left.createdAt) ||
+    right.id.localeCompare(left.id)
+  );
 }
 
 function formatDate(value: string) {
@@ -185,6 +196,8 @@ export default function AdminDashboardPage() {
   const [profileDetail, setProfileDetail] = useState<UserProfileDetail | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
+  const [appointmentsNextCursor, setAppointmentsNextCursor] = useState<string | null>(null);
+  const [appointmentsLoadingMore, setAppointmentsLoadingMore] = useState(false);
   const isLoadingData = useRef(false);
   const [selectedVaccines, setSelectedVaccines] = useState<Record<string, string>>({});
   const [hospitalId, setHospitalId] = useState('');
@@ -224,12 +237,13 @@ export default function AdminDashboardPage() {
         fetch('/api/admin/vaccine-records', { cache: 'no-store' }),
       ]);
       const [appointmentData, slotData, vaccineData, recordData] = await Promise.all([
-        readJson<{ appointments: Appointment[] }>(appointmentResponse),
+        readJson<{ appointments: Appointment[]; nextCursor: string | null }>(appointmentResponse),
         readJson<{ hospitals: Hospital[]; slots: HospitalSlot[] }>(slotResponse),
         readJson<{ vaccines: Vaccine[] }>(vaccineResponse),
         readJson<{ records: PendingRecord[] }>(recordResponse),
       ]);
-      setAppointments(appointmentData.appointments);
+      setAppointments((current) => mergeAppointments(current, appointmentData.appointments));
+      setAppointmentsNextCursor((current) => current ?? appointmentData.nextCursor);
       setHospitals(slotData.hospitals);
       setSlots(slotData.slots);
       setSlotCapacityEdits({});
@@ -256,13 +270,14 @@ export default function AdminDashboardPage() {
           fetch('/api/admin/vaccine-records', { cache: 'no-store' }),
         ]);
         const [appointmentData, slotData, vaccineData, recordData] = await Promise.all([
-          readJson<{ appointments: Appointment[] }>(appointmentResponse),
+          readJson<{ appointments: Appointment[]; nextCursor: string | null }>(appointmentResponse),
           readJson<{ hospitals: Hospital[]; slots: HospitalSlot[] }>(slotResponse),
           readJson<{ vaccines: Vaccine[] }>(vaccineResponse),
           readJson<{ records: PendingRecord[] }>(recordResponse),
         ]);
         if (!isMounted) return;
         setAppointments(appointmentData.appointments);
+        setAppointmentsNextCursor(appointmentData.nextCursor);
         setHospitals(slotData.hospitals);
         setSlots(slotData.slots);
         setSlotCapacityEdits({});
@@ -278,6 +293,23 @@ export default function AdminDashboardPage() {
     void loadInitialData();
     return () => { isMounted = false; };
   }, []);
+
+  const loadMoreAppointments = useCallback(async () => {
+    if (!appointmentsNextCursor || appointmentsLoadingMore) return;
+    setAppointmentsLoadingMore(true);
+    try {
+      const response = await fetch(`/api/admin/appointments?cursor=${encodeURIComponent(appointmentsNextCursor)}`, {
+        cache: 'no-store',
+      });
+      const data = await readJson<{ appointments: Appointment[]; nextCursor: string | null }>(response);
+      setAppointments((current) => mergeAppointments(current, data.appointments));
+      setAppointmentsNextCursor(data.nextCursor);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'ไม่สามารถโหลดนัดหมายเพิ่มเติมได้');
+    } finally {
+      setAppointmentsLoadingMore(false);
+    }
+  }, [appointmentsLoadingMore, appointmentsNextCursor]);
 
   useEffect(() => {
     if (activeTab !== 'appointments' || isLoading) return;
@@ -652,7 +684,8 @@ export default function AdminDashboardPage() {
               <div className="flex flex-col gap-1 border-b p-5 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <h2 className="text-xl font-extrabold">รายการนัดหมายและคิวรับบริการ</h2>
-                <p className="mt-1 text-sm text-slate-500">คิวที่ยังดำเนินการ {activeAppointments.length} รายการ · อัปเดตอัตโนมัติทุก 10 วินาที{lastRefreshedAt ? ` · ล่าสุด ${formatDate(lastRefreshedAt.toISOString())}` : ''}</p>
+                <p className="mt-1 text-sm text-slate-500">คิวที่ยังดำเนินการในรายการที่โหลดแล้ว {activeAppointments.length} รายการ · อัปเดตอัตโนมัติทุก 10 วินาที{lastRefreshedAt ? ` · ล่าสุด ${formatDate(lastRefreshedAt.toISOString())}` : ''}</p>
+                {appointmentsNextCursor && <p className="mt-1 text-xs text-amber-700">มีรายการเพิ่มเติมที่ยังไม่ได้โหลด ค้นหาได้เฉพาะรายการที่โหลดแล้ว</p>}
               </div>
               </div>
               <div className="overflow-x-auto">
@@ -712,6 +745,18 @@ export default function AdminDashboardPage() {
                   </tbody>
                 </table>
               </div>
+              {appointmentsNextCursor && (
+                <div className="border-t p-4 text-center">
+                  <button
+                    type="button"
+                    onClick={() => void loadMoreAppointments()}
+                    disabled={appointmentsLoadingMore}
+                    className="rounded-xl border border-teal-200 px-4 py-2 text-sm font-bold text-teal-800 hover:bg-teal-50 disabled:opacity-60"
+                  >
+                    {appointmentsLoadingMore ? 'กำลังโหลด...' : 'โหลดรายการนัดหมายเพิ่มเติม'}
+                  </button>
+                </div>
+              )}
             </section>
           )}
 
@@ -720,6 +765,7 @@ export default function AdminDashboardPage() {
               <div className="border-b p-5">
                 <h2 className="text-xl font-extrabold">ประวัติการจอง</h2>
                 <p className="mt-1 text-sm text-slate-500">รายการที่ฉีดแล้ว ยกเลิก หมดอายุ หรือไม่มาตามนัด ({historicalAppointments.length})</p>
+                {appointmentsNextCursor && <p className="mt-1 text-xs text-amber-700">มีรายการเพิ่มเติมที่ยังไม่ได้โหลด ค้นหาได้เฉพาะรายการที่โหลดแล้ว</p>}
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[760px] text-left text-sm">
@@ -756,6 +802,18 @@ export default function AdminDashboardPage() {
                   </tbody>
                 </table>
               </div>
+              {appointmentsNextCursor && (
+                <div className="border-t p-4 text-center">
+                  <button
+                    type="button"
+                    onClick={() => void loadMoreAppointments()}
+                    disabled={appointmentsLoadingMore}
+                    className="rounded-xl border border-teal-200 px-4 py-2 text-sm font-bold text-teal-800 hover:bg-teal-50 disabled:opacity-60"
+                  >
+                    {appointmentsLoadingMore ? 'กำลังโหลด...' : 'โหลดรายการนัดหมายเพิ่มเติม'}
+                  </button>
+                </div>
+              )}
             </section>
           )}
 
