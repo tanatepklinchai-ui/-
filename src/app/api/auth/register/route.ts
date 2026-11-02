@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 import bcrypt from 'bcrypt';
 import { prisma } from '@/lib/prisma';
+import { recordUserActivity } from '@/lib/userActivity';
 export const dynamic = 'force-dynamic';
 export async function POST(req: Request) {
   try {
@@ -33,13 +34,17 @@ export async function POST(req: Request) {
     const passwordHash = await bcrypt.hash(password, 10);
 
     // 4. บันทึกข้อมูลลงในฐานข้อมูล
-    const newUser = await prisma.user.create({
-      data: {
-        email,
-        username,
-        passwordHash,
-        role,
-      },
+    const newUser = await prisma.$transaction(async (transaction) => {
+      const createdUser = await transaction.user.create({
+        data: {
+          email,
+          username,
+          passwordHash,
+          role,
+        },
+      });
+      await recordUserActivity(transaction, createdUser.id, 'ACCOUNT_REGISTERED');
+      return createdUser;
     });
 
     return NextResponse.json(

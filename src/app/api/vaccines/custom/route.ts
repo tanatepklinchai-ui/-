@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth';
+import { recordUserActivity } from '@/lib/userActivity';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,12 +33,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'กรุณาระบุชื่อวัคซีน' }, { status: 400 });
     }
 
-    const request = await prisma.vaccineRequest.create({
-      data: {
-        userId: session.userId,
-        requestedName: requestedName.trim(),
-        status: 'PENDING'
-      }
+    const request = await prisma.$transaction(async (transaction) => {
+      const createdRequest = await transaction.vaccineRequest.create({
+        data: {
+          userId: session.userId,
+          requestedName: requestedName.trim(),
+          status: 'PENDING'
+        }
+      });
+      await recordUserActivity(transaction, session.userId, 'VACCINE_REQUEST_SUBMITTED');
+      return createdRequest;
     });
     return NextResponse.json({ success: true, request }, { status: 201 });
   } catch {

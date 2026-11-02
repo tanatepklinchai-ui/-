@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import bcrypt from 'bcrypt';
 import { prisma } from '@/lib/prisma';
 import { setSession } from '@/lib/auth'; // 1. นำเข้า setSession
+import { recordUserActivity } from '@/lib/userActivity';
 export const dynamic = 'force-dynamic';
 export async function POST(req: Request) {
   try {
@@ -22,6 +23,10 @@ export async function POST(req: Request) {
     if (!isPasswordValid) {
       return NextResponse.json({ error: 'รหัสผ่านไม่ถูกต้อง' }, { status: 401 });
     }
+
+    await prisma.$transaction((transaction) =>
+      recordUserActivity(transaction, user.id, 'ACCOUNT_LOGIN')
+    );
 
     // 2. สร้าง Session และบันทึกลงใน HTTP-Only Cookie
     await setSession({

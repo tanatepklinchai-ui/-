@@ -38,6 +38,8 @@ Keep secret values out of source control. Admin registration only grants the `AD
 
 Admins can promote or demote accounts from the **จัดการผู้ใช้งาน** tab in the admin dashboard. The system prevents demoting the account currently in use or removing the last administrator. A newly promoted user must sign out and sign in again to receive an admin session.
 
+The **กิจกรรมผู้ใช้** tab records successful sign-ins, registrations, child profile changes, appointment actions, vaccine record/request submissions, notification email changes, and Push notification subscription changes. It shows the latest 100 events and does not store health details in the activity log. Apply the activity log migration with `npx prisma migrate deploy`.
+
 The admin appointment queue refreshes automatically every 10 seconds while its tab is open. Cancelled, expired, no-show, and completed appointments are shown separately under **ประวัติการจอง**. The user-management tab also provides each user's profile, children, verified vaccine progress, vaccine records, and appointment history.
 
 Generate a VAPID key pair for Web Push with `npx web-push generate-vapid-keys` and configure all three VAPID values locally and in production. Web Push requires HTTPS in production; localhost is supported for local development. Apply the Web Push subscription migration with `npx prisma migrate deploy` before deploying the app. Existing databases were baselined at `20260927000000_init`; later schema changes should be added as new Prisma migrations.

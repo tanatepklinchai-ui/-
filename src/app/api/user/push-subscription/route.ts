@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
 import { getWebPushPublicKey, isWebPushConfigured } from '@/lib/webPush';
 import { prisma } from '@/lib/prisma';
+import { recordUserActivity } from '@/lib/userActivity';
 
 export const dynamic = 'force-dynamic';
 
@@ -71,16 +72,19 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'อุปกรณ์นี้เชื่อมกับบัญชีอื่นอยู่' }, { status: 409 });
     }
 
-    if (existing) {
-      await prisma.webPushSubscription.update({
-        where: { id: existing.id },
-        data: { p256dh, auth },
-      });
-    } else {
-      await prisma.webPushSubscription.create({
-        data: { userId: session.userId, endpoint, p256dh, auth },
-      });
-    }
+    await prisma.$transaction(async (transaction) => {
+      if (existing) {
+        await transaction.webPushSubscription.update({
+          where: { id: existing.id },
+          data: { p256dh, auth },
+        });
+      } else {
+        await transaction.webPushSubscription.create({
+          data: { userId: session.userId, endpoint, p256dh, auth },
+        });
+      }
+      await recordUserActivity(transaction, session.userId, 'PUSH_NOTIFICATIONS_ENABLED');
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -102,8 +106,13 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ error: 'ข้อมูลอุปกรณ์ไม่ถูกต้อง' }, { status: 400 });
     }
 
-    await prisma.webPushSubscription.deleteMany({
-      where: { userId: session.userId, endpoint },
+    await prisma.$transaction(async (transaction) => {
+      const result = await transaction.webPushSubscription.deleteMany({
+        where: { userId: session.userId, endpoint },
+      });
+      if (result.count > 0) {
+        await recordUserActivity(transaction, session.userId, 'PUSH_NOTIFICATIONS_DISABLED');
+      }
     });
     return NextResponse.json({ success: true });
   } catch {

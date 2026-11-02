@@ -5,7 +5,13 @@ import type { FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { VACCINE_SCHEDULE } from '@/lib/vaccineSchedule';
 
-type Tab = 'appointments' | 'appointmentHistory' | 'hospitals' | 'slots' | 'vaccines' | 'records' | 'users';
+type Tab = 'appointments' | 'appointmentHistory' | 'hospitals' | 'slots' | 'vaccines' | 'records' | 'users' | 'activityLogs';
+type UserActivity = {
+  id: string;
+  action: string;
+  createdAt: string;
+  user: { username: string; email: string } | null;
+};
 type ManagedUser = {
   id: string;
   email: string;
@@ -98,7 +104,24 @@ const tabs: { id: Tab; label: string }[] = [
   { id: 'vaccines', label: 'สต็อกวัคซีน' },
   { id: 'records', label: 'ตรวจประวัติ' },
   { id: 'users', label: 'จัดการผู้ใช้งาน' },
+  { id: 'activityLogs', label: 'กิจกรรมผู้ใช้' },
 ];
+
+const activityLabels: Record<string, string> = {
+  ACCOUNT_REGISTERED: 'สมัครสมาชิก',
+  ACCOUNT_LOGIN: 'เข้าสู่ระบบ',
+  ACCOUNT_LOGOUT: 'ออกจากระบบ',
+  CHILD_ADDED: 'เพิ่มข้อมูลเด็ก',
+  CHILD_UPDATED: 'แก้ไขข้อมูลเด็ก',
+  APPOINTMENT_BOOKED: 'จองนัดหมาย',
+  APPOINTMENT_CANCELLED: 'ยกเลิกนัดหมาย',
+  APPOINTMENT_RESCHEDULE_REQUESTED: 'ขอเลื่อนนัดหมาย',
+  VACCINE_RECORD_ADDED: 'เพิ่มประวัติวัคซีน',
+  VACCINE_REQUEST_SUBMITTED: 'ส่งคำขอเพิ่มวัคซีน',
+  NOTIFICATION_EMAIL_UPDATED: 'เปลี่ยนอีเมลรับแจ้งเตือน',
+  PUSH_NOTIFICATIONS_ENABLED: 'เปิดการแจ้งเตือนบนเว็บ',
+  PUSH_NOTIFICATIONS_DISABLED: 'ปิดการแจ้งเตือนบนเว็บ',
+};
 
 async function readJson<T>(response: Response): Promise<T> {
   const data = await response.json();
@@ -188,6 +211,8 @@ export default function AdminDashboardPage() {
   const [vaccines, setVaccines] = useState<Vaccine[]>([]);
   const [records, setRecords] = useState<PendingRecord[]>([]);
   const [users, setUsers] = useState<ManagedUser[]>([]);
+  const [userActivities, setUserActivities] = useState<UserActivity[]>([]);
+  const [activitiesLoading, setActivitiesLoading] = useState(false);
   const [usersNextCursor, setUsersNextCursor] = useState<string | null>(null);
   const [usersCurrentCursor, setUsersCurrentCursor] = useState<string | null>(null);
   const [usersPreviousCursors, setUsersPreviousCursors] = useState<(string | null)[]>([]);
@@ -342,6 +367,19 @@ export default function AdminDashboardPage() {
     }
   }, [searchTerm]);
 
+  const loadUserActivities = useCallback(async () => {
+    setActivitiesLoading(true);
+    try {
+      const response = await fetch('/api/admin/activity-logs', { cache: 'no-store' });
+      const data = await readJson<{ activities: UserActivity[] }>(response);
+      setUserActivities(data.activities);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'ไม่สามารถโหลดประวัติกิจกรรมได้');
+    } finally {
+      setActivitiesLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (activeTab !== 'users') return;
     const controller = new AbortController();
@@ -353,6 +391,14 @@ export default function AdminDashboardPage() {
       controller.abort();
     };
   }, [activeTab, loadUsers]);
+
+  useEffect(() => {
+    if (activeTab !== 'activityLogs') return;
+    const timeoutId = window.setTimeout(() => {
+      void loadUserActivities();
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, [activeTab, loadUserActivities]);
 
   async function performAction(
     key: string,
@@ -1138,6 +1184,46 @@ export default function AdminDashboardPage() {
                   </div>
                 </>
               )}
+            </section>
+          )}
+
+          {activeTab === 'activityLogs' && (
+            <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <div className="flex flex-col gap-3 border-b p-5 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="text-xl font-extrabold">ประวัติกิจกรรมผู้ใช้</h2>
+                  <p className="mt-1 text-sm text-slate-500">แสดงกิจกรรมล่าสุดไม่เกิน 100 รายการ โดยไม่บันทึกรายละเอียดข้อมูลสุขภาพ</p>
+                </div>
+                <button
+                  onClick={() => void loadUserActivities()}
+                  disabled={activitiesLoading}
+                  className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                >{activitiesLoading ? 'กำลังโหลด...' : 'โหลดใหม่'}</button>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[640px] text-left text-sm">
+                  <thead className="bg-slate-50 text-xs text-slate-500">
+                    <tr><th className="p-4">วันและเวลา</th><th className="p-4">ผู้ใช้</th><th className="p-4">กิจกรรม</th></tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {activitiesLoading && userActivities.length === 0 ? (
+                      <tr><td colSpan={3} className="p-10 text-center text-slate-500">กำลังโหลดประวัติกิจกรรม...</td></tr>
+                    ) : userActivities.length === 0 ? (
+                      <tr><td colSpan={3} className="p-10 text-center text-slate-500">ยังไม่มีประวัติกิจกรรม</td></tr>
+                    ) : userActivities.map((activity) => (
+                      <tr key={activity.id}>
+                        <td className="whitespace-nowrap p-4">{formatDate(activity.createdAt)}</td>
+                        <td className="p-4">
+                          {activity.user ? (
+                            <><p className="font-semibold">{activity.user.username}</p><p className="mt-1 text-xs text-slate-500">{activity.user.email}</p></>
+                          ) : 'บัญชีถูกลบ'}
+                        </td>
+                        <td className="p-4">{activityLabels[activity.action] ?? activity.action}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </section>
           )}
         </>}

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth';
+import { recordUserActivity } from '@/lib/userActivity';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,9 +36,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'อีเมลไม่ถูกต้อง' }, { status: 400 });
     }
 
-    await prisma.user.update({
-      where: { id: session.userId },
-      data: { notificationEmail: email },
+    await prisma.$transaction(async (transaction) => {
+      await transaction.user.update({
+        where: { id: session.userId },
+        data: { notificationEmail: email },
+      });
+      await recordUserActivity(transaction, session.userId, 'NOTIFICATION_EMAIL_UPDATED');
     });
 
     return NextResponse.json({ success: true });

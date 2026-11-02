@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth';
 import { VACCINE_SCHEDULE } from '@/lib/vaccineSchedule';
+import { recordUserActivity } from '@/lib/userActivity';
 
 export const dynamic = 'force-dynamic';
 
@@ -75,18 +76,22 @@ export async function POST(req: Request) {
     if (!child?.dob) return NextResponse.json({ error: 'กรุณาบันทึกวันเกิดของเด็กก่อน' }, { status: 400 });
     if (date < child.dob) return NextResponse.json({ error: 'วันที่รับวัคซีนต้องไม่ก่อนวันเกิด' }, { status: 400 });
 
-    const record = await prisma.vaccineRecord.create({
-      data: {
-        userId: session.userId,
-        childId: child.id,
-        vaccineCode: finalVaccineCode,
-        vaccineCatalogId: vaccineCatalogId || null,
-        vaccineName: finalVaccineName,
-        administeredDate: date,
-        hospitalName: hospitalName?.trim() || 'ไม่ระบุในสมุดวัคซีน',
-        source: 'PARENT_REPORTED',
-        verificationStatus: 'PENDING',
-      },
+    const record = await prisma.$transaction(async (transaction) => {
+      const createdRecord = await transaction.vaccineRecord.create({
+        data: {
+          userId: session.userId,
+          childId: child.id,
+          vaccineCode: finalVaccineCode,
+          vaccineCatalogId: vaccineCatalogId || null,
+          vaccineName: finalVaccineName,
+          administeredDate: date,
+          hospitalName: hospitalName?.trim() || 'ไม่ระบุในสมุดวัคซีน',
+          source: 'PARENT_REPORTED',
+          verificationStatus: 'PENDING',
+        },
+      });
+      await recordUserActivity(transaction, session.userId, 'VACCINE_RECORD_ADDED');
+      return createdRecord;
     });
 
     return NextResponse.json({ success: true, record }, { status: 201 });

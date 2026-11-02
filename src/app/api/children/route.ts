@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth';
+import { recordUserActivity } from '@/lib/userActivity';
 
 export const dynamic = 'force-dynamic';
 
@@ -44,16 +45,20 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'ข้อมูลเด็กไม่ถูกต้อง' }, { status: 400 });
     }
 
-    const child = await prisma.child.create({
-      data: {
-        userId: session.userId,
-        firstName: typeof firstName === 'string' ? firstName.trim() || null : null,
-        lastName: typeof lastName === 'string' ? lastName.trim() || null : null,
-        gender: typeof gender === 'string' ? gender : null,
-        dob: birthDate,
-        weight: parsedWeight,
-        height: parsedHeight,
-      },
+    const child = await prisma.$transaction(async (transaction) => {
+      const createdChild = await transaction.child.create({
+        data: {
+          userId: session.userId,
+          firstName: typeof firstName === 'string' ? firstName.trim() || null : null,
+          lastName: typeof lastName === 'string' ? lastName.trim() || null : null,
+          gender: typeof gender === 'string' ? gender : null,
+          dob: birthDate,
+          weight: parsedWeight,
+          height: parsedHeight,
+        },
+      });
+      await recordUserActivity(transaction, session.userId, 'CHILD_ADDED');
+      return createdChild;
     });
 
     return NextResponse.json({ success: true, child }, { status: 201 });

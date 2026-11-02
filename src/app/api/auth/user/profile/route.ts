@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth'; // นำเข้า getSession
+import { recordUserActivity } from '@/lib/userActivity';
 export const dynamic = 'force-dynamic';
 export async function GET(req: Request) {
   const session = await getSession();
@@ -62,16 +63,20 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'ไม่พบข้อมูลเด็ก' }, { status: 404 });
   }
 
-  const profile = await prisma.child.update({
-    where: { id: childId },
-    data: {
-      firstName: typeof firstName === 'string' ? firstName.trim() || null : null,
-      lastName: typeof lastName === 'string' ? lastName.trim() || null : null,
-      gender: typeof gender === 'string' ? gender : null,
-      weight: parsedWeight,
-      height: parsedHeight,
-      dob: birthDate,
-    },
+  const profile = await prisma.$transaction(async (transaction) => {
+    const updatedProfile = await transaction.child.update({
+      where: { id: childId },
+      data: {
+        firstName: typeof firstName === 'string' ? firstName.trim() || null : null,
+        lastName: typeof lastName === 'string' ? lastName.trim() || null : null,
+        gender: typeof gender === 'string' ? gender : null,
+        weight: parsedWeight,
+        height: parsedHeight,
+        dob: birthDate,
+      },
+    });
+    await recordUserActivity(transaction, session.userId, 'CHILD_UPDATED');
+    return updatedProfile;
   });
 
   return NextResponse.json({ success: true, profile });

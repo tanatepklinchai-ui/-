@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth';
+import { recordUserActivity } from '@/lib/userActivity';
 
 export const dynamic = 'force-dynamic';
 
@@ -174,7 +175,7 @@ export async function POST(req: Request) {
         throw new AppointmentRequestError('ชื่อวัคซีนไม่ถูกต้อง', 400);
       }
 
-      return transaction.appointment.create({
+      const appointment = await transaction.appointment.create({
         data: {
           userId: session.userId,
           childId: child.id,
@@ -188,6 +189,8 @@ export async function POST(req: Request) {
         },
         include: appointmentInclude(),
       });
+      await recordUserActivity(transaction, session.userId, 'APPOINTMENT_BOOKED');
+      return appointment;
     });
 
     return NextResponse.json({ success: true, appointment, waitlisted: false }, { status: 201 });
@@ -229,11 +232,13 @@ export async function PATCH(req: Request) {
         if (!['PENDING', 'CONFIRMED', 'RESCHEDULED'].includes(currentAppointment.status)) {
           throw new AppointmentRequestError('นัดหมายนี้ไม่สามารถส่งคำขอเลื่อนได้', 409);
         }
-        return transaction.appointment.update({
+        const appointment = await transaction.appointment.update({
           where: { id: appointmentId },
           data: { status: 'RESCHEDULE_REQUESTED' },
           include: appointmentInclude(),
         });
+        await recordUserActivity(transaction, session.userId, 'APPOINTMENT_RESCHEDULE_REQUESTED');
+        return appointment;
       }
 
       if (status === 'CANCELLED') {
@@ -251,11 +256,13 @@ export async function PATCH(req: Request) {
           await promoteWaitlistedAppointment(transaction, currentAppointment.hospitalId, currentAppointment.scheduledAt);
         }
 
-        return transaction.appointment.update({
+        const appointment = await transaction.appointment.update({
           where: { id: appointmentId },
           data: { status: 'CANCELLED' },
           include: appointmentInclude(),
         });
+        await recordUserActivity(transaction, session.userId, 'APPOINTMENT_CANCELLED');
+        return appointment;
       }
       throw new AppointmentRequestError('ข้อมูลนัดหมายไม่ถูกต้อง', 400);
     });
