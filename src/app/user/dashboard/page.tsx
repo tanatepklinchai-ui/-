@@ -39,6 +39,7 @@ type ChildProfile = {
   dob: string | null;
   weight: number | null;
   height: number | null;
+  archivedAt?: string | null;
 };
 
 type VaccineRecord = {
@@ -124,12 +125,14 @@ export default function ColorfulDashboard() {
   // States: Child Profile
   const [childProfile, setChildProfile] = useState<ChildProfile | null>(null);
   const [children, setChildren] = useState<ChildProfile[]>([]);
+  const [archivedChildren, setArchivedChildren] = useState<ChildProfile[]>([]);
   const [selectedChildId, setSelectedChildId] = useState<string | null>(null);
   const [isAddingChild, setIsAddingChild] = useState(false);
   const [profileForm, setProfileForm] = useState({ firstName: '', dob: '', weight: '', height: '' });
   const [profileLoading, setProfileLoading] = useState(true);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileError, setProfileError] = useState('');
+  const [childActionId, setChildActionId] = useState('');
 
   // States: Standard Vaccines
   const [vaccineRecords, setVaccineRecords] = useState<VaccineRecord[]>([]);
@@ -222,6 +225,7 @@ export default function ColorfulDashboard() {
         if (!response.ok) throw new Error(data.error || 'ไม่สามารถโหลดข้อมูลเด็กได้');
         const loadedChildren: ChildProfile[] = data.children ?? [];
         setChildren(loadedChildren);
+        setArchivedChildren(data.archivedChildren ?? []);
         if (loadedChildren.length > 0) {
           const query = new URLSearchParams(window.location.search);
           const requestedChildId = query.get('childId');
@@ -414,6 +418,82 @@ export default function ColorfulDashboard() {
     setProfileForm({ firstName: '', dob: '', weight: '', height: '' });
     setRecordingVaccineCode(null);
     setProfileError('');
+  };
+
+  const refreshChildLists = async () => {
+    const response = await fetch('/api/children', { cache: 'no-store' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'ไม่สามารถโหลดข้อมูลเด็กได้');
+    const activeChildren: ChildProfile[] = data.children ?? [];
+    setChildren(activeChildren);
+    setArchivedChildren(data.archivedChildren ?? []);
+    return activeChildren;
+  };
+
+  const handleDeleteChild = async (child: ChildProfile, permanent: boolean) => {
+    const childLabel = child.firstName || 'เด็กคนนี้';
+    const confirmation = permanent
+      ? `ลบข้อมูล${childLabel}ถาวรหรือไม่? นัดหมายและประวัติวัคซีนที่ผูกอยู่จะถูกลบด้วย และกู้คืนไม่ได้`
+      : `ซ่อนข้อมูล${childLabel}ชั่วคราวหรือไม่? คุณสามารถกู้คืนได้ภายหลัง`;
+    if (!window.confirm(confirmation)) return;
+
+    setChildActionId(child.id);
+    setProfileError('');
+    try {
+      const response = await fetch(`/api/children/${encodeURIComponent(child.id)}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ permanent }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'ไม่สามารถลบข้อมูลเด็กได้');
+      const activeChildren = await refreshChildLists();
+      if (selectedChildId === child.id) {
+        if (activeChildren.length > 0) handleSelectChild(activeChildren[0].id);
+        else handleAddChild();
+      }
+      notify('success', permanent ? 'ลบข้อมูลเด็กถาวรแล้ว' : 'ซ่อนข้อมูลเด็กชั่วคราวแล้ว');
+    } catch (error) {
+      setProfileError(error instanceof Error ? error.message : 'ไม่สามารถลบข้อมูลเด็กได้');
+    } finally {
+      setChildActionId('');
+    }
+  };
+
+  const handleRestoreChild = async (child: ChildProfile) => {
+    setChildActionId(child.id);
+    setProfileError('');
+    try {
+      const response = await fetch(`/api/children/${encodeURIComponent(child.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'restore' }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'ไม่สามารถกู้คืนข้อมูลเด็กได้');
+      const activeChildren = await refreshChildLists();
+      if (activeChildren.length === 1) {
+        const restoredChild = activeChildren.find((item) => item.id === child.id) ?? child;
+        setChildProfile(restoredChild);
+        setSelectedChildId(restoredChild.id);
+        setAppointments([]);
+        setVaccineRecords([]);
+        setAppointmentsLoading(true);
+        setVaccineLoading(true);
+        setIsAddingChild(false);
+        setProfileForm({
+          firstName: restoredChild.firstName ?? '',
+          dob: restoredChild.dob ? restoredChild.dob.slice(0, 10) : '',
+          weight: restoredChild.weight?.toString() ?? '',
+          height: restoredChild.height?.toString() ?? '',
+        });
+      }
+      notify('success', 'กู้คืนข้อมูลเด็กแล้ว');
+    } catch (error) {
+      setProfileError(error instanceof Error ? error.message : 'ไม่สามารถกู้คืนข้อมูลเด็กได้');
+    } finally {
+      setChildActionId('');
+    }
   };
 
   const handleReportVaccine = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -798,11 +878,53 @@ export default function ColorfulDashboard() {
                     <input type="number" min="0" step="0.1" value={profileForm.height} onChange={(event) => setProfileForm((current) => ({ ...current, height: event.target.value }))} className="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-normal text-slate-800" />
                   </label>
                   <div className="sm:col-span-2">
-                    <button type="submit" disabled={isSavingProfile || profileLoading} className="rounded-xl bg-teal-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-teal-700 disabled:opacity-60">
+                    <button type="submit" disabled={isSavingProfile || profileLoading || Boolean(childProfile && childActionId === childProfile.id)} className="rounded-xl bg-teal-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-teal-700 disabled:opacity-60">
                       {isSavingProfile ? 'กำลังบันทึก...' : isAddingChild ? 'เพิ่มเด็ก' : 'บันทึกข้อมูลเด็ก'}
                     </button>
+                    {!isAddingChild && childProfile && (
+                      <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
+                        <button
+                          type="button"
+                          disabled={childActionId === childProfile.id}
+                          onClick={() => void handleDeleteChild(childProfile, false)}
+                          className="rounded-xl bg-amber-50 px-4 py-2 text-xs font-bold text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+                        >ลบชั่วคราว</button>
+                        <button
+                          type="button"
+                          disabled={childActionId === childProfile.id}
+                          onClick={() => void handleDeleteChild(childProfile, true)}
+                          className="rounded-xl bg-rose-50 px-4 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+                        >ลบถาวร</button>
+                      </div>
+                    )}
                   </div>
                 </form>
+                {archivedChildren.length > 0 && (
+                  <section className="mt-6 rounded-2xl border border-amber-200 bg-amber-50/60 p-4">
+                    <h3 className="font-bold text-amber-950">ข้อมูลเด็กที่ลบชั่วคราว ({archivedChildren.length})</h3>
+                    <ul className="mt-3 space-y-2">
+                      {archivedChildren.map((child) => (
+                        <li key={child.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white p-3">
+                          <span className="text-sm font-semibold text-slate-700">{child.firstName || 'ไม่ระบุชื่อเด็ก'}</span>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              disabled={childActionId === child.id}
+                              onClick={() => void handleRestoreChild(child)}
+                              className="rounded-lg bg-teal-50 px-3 py-2 text-xs font-bold text-teal-800 hover:bg-teal-100 disabled:opacity-50"
+                            >กู้คืน</button>
+                            <button
+                              type="button"
+                              disabled={childActionId === child.id}
+                              onClick={() => void handleDeleteChild(child, true)}
+                              className="rounded-lg bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+                            >ลบถาวร</button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                )}
               </section>
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">

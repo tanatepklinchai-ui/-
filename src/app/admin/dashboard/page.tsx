@@ -36,6 +36,7 @@ type UserProfileDetail = ManagedUser & {
     dob: string | null;
     weight: number | null;
     height: number | null;
+    archivedAt: string | null;
     vaccineRecords: {
       id: string;
       vaccineCode: string | null;
@@ -113,6 +114,9 @@ const activityLabels: Record<string, string> = {
   ACCOUNT_LOGOUT: 'ออกจากระบบ',
   CHILD_ADDED: 'เพิ่มข้อมูลเด็ก',
   CHILD_UPDATED: 'แก้ไขข้อมูลเด็ก',
+  CHILD_ARCHIVED: 'ลบข้อมูลเด็กชั่วคราว',
+  CHILD_RESTORED: 'กู้คืนข้อมูลเด็ก',
+  CHILD_PERMANENTLY_DELETED: 'ลบข้อมูลเด็กถาวร',
   APPOINTMENT_BOOKED: 'จองนัดหมาย',
   APPOINTMENT_CANCELLED: 'ยกเลิกนัดหมาย',
   APPOINTMENT_RESCHEDULE_REQUESTED: 'ขอเลื่อนนัดหมาย',
@@ -513,6 +517,32 @@ export default function AdminDashboardPage() {
     } finally {
       setProfileLoading(false);
     }
+  }
+
+  async function manageChild(childId: string, action: 'archive' | 'restore' | 'delete') {
+    const child = profileDetail?.children.find((item) => item.id === childId);
+    if (!child || !profileTarget) return;
+    const permanent = action === 'delete';
+    const actionName = action === 'archive' ? 'ซ่อนข้อมูลเด็กชั่วคราว' : action === 'restore' ? 'กู้คืนข้อมูลเด็ก' : 'ลบข้อมูลเด็กถาวร';
+    if (!window.confirm(permanent
+      ? `ลบข้อมูล ${childName(child)} ถาวรหรือไม่? นัดหมายและประวัติวัคซีนที่ผูกอยู่จะถูกลบด้วย และกู้คืนไม่ได้`
+      : action === 'archive'
+        ? `ซ่อนข้อมูล ${childName(child)} ชั่วคราวหรือไม่? สามารถกู้คืนได้ภายหลัง`
+        : `กู้คืนข้อมูล ${childName(child)} หรือไม่?`)) return;
+
+    await performAction(`child-${childId}`, async () => {
+      const response = await fetch(`/api/admin/children/${encodeURIComponent(childId)}`, {
+        method: permanent ? 'DELETE' : 'PATCH',
+        ...(permanent ? {} : {
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action }),
+        }),
+      });
+      await readJson(response);
+      const profileResponse = await fetch(`/api/admin/users/${encodeURIComponent(profileTarget.id)}`, { cache: 'no-store' });
+      const data = await readJson<{ user: UserProfileDetail }>(profileResponse);
+      setProfileDetail(data.user);
+    }, `${actionName}แล้ว`);
   }
 
   async function deleteHospital(hospital: Hospital) {
@@ -1285,7 +1315,10 @@ export default function AdminDashboardPage() {
                         const progress = Math.round((verifiedCount / VACCINE_SCHEDULE.length) * 100);
                         return (
                           <article key={child.id} className="rounded-xl border border-slate-200 p-4">
-                            <h4 className="font-bold">{childName(child)}</h4>
+                            <div className="flex items-start justify-between gap-2">
+                              <h4 className="font-bold">{childName(child)}</h4>
+                              {child.archivedAt && <span className="shrink-0 rounded-full bg-amber-100 px-2 py-1 text-[10px] font-bold text-amber-800">ลบชั่วคราว</span>}
+                            </div>
                             <p className="mt-1 text-xs text-slate-500">
                               {child.dob ? `เกิด ${new Date(child.dob).toLocaleDateString('th-TH', { dateStyle: 'medium', timeZone: 'UTC' })}` : 'ไม่ระบุวันเกิด'}
                               {child.gender ? ` · ${child.gender}` : ''}
@@ -1311,6 +1344,29 @@ export default function AdminDashboardPage() {
                                 ))}
                               </ul>
                             )}
+                            <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-3">
+                              {child.archivedAt ? (
+                                <button
+                                  type="button"
+                                  disabled={busyKey === `child-${child.id}`}
+                                  onClick={() => void manageChild(child.id, 'restore')}
+                                  className="rounded-lg bg-teal-50 px-3 py-2 text-xs font-bold text-teal-800 hover:bg-teal-100 disabled:opacity-50"
+                                >กู้คืน</button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  disabled={busyKey === `child-${child.id}`}
+                                  onClick={() => void manageChild(child.id, 'archive')}
+                                  className="rounded-lg bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+                                >ลบชั่วคราว</button>
+                              )}
+                              <button
+                                type="button"
+                                disabled={busyKey === `child-${child.id}`}
+                                onClick={() => void manageChild(child.id, 'delete')}
+                                className="rounded-lg bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+                              >ลบถาวร</button>
+                            </div>
                           </article>
                         );
                       })}

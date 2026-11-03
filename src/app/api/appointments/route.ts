@@ -1,8 +1,8 @@
-import { Prisma } from '@prisma/client';
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getSession } from '@/lib/auth';
 import { recordUserActivity } from '@/lib/userActivity';
+import { releaseAppointmentCapacity } from '@/lib/appointmentCapacity';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,28 +10,6 @@ class AppointmentRequestError extends Error {
   constructor(message: string, readonly status: number) {
     super(message);
   }
-}
-
-function getBangkokSlot(date: Date) {
-  const parts = new Intl.DateTimeFormat('en', {
-    timeZone: 'Asia/Bangkok',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  }).formatToParts(date);
-  const partValues = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
-
-  return {
-    date: new Date(Date.UTC(
-      Number(partValues.year),
-      Number(partValues.month) - 1,
-      Number(partValues.day)
-    )),
-    time: `${partValues.hour}:${partValues.minute}`,
-  };
 }
 
 function isValidAppointmentDate(value: unknown): value is string {
@@ -54,55 +32,6 @@ function appointmentInclude() {
   };
 }
 
-async function promoteWaitlistedAppointment(transaction: Prisma.TransactionClient, hospitalId: string, scheduledAt: Date) {
-  const slotKey = getBangkokSlot(scheduledAt);
-  const slot = await transaction.hospitalSlot.findUnique({
-    where: { hospitalId_date_time: { hospitalId, date: slotKey.date, time: slotKey.time } },
-  });
-
-  if (!slot || slot.isClosed || slot.booked >= slot.capacity) {
-    return false;
-  }
-
-  const nextWaitlisted = await transaction.appointment.findFirst({
-    where: {
-      hospitalId,
-      scheduledAt,
-      status: 'PENDING',
-      isWaitlisted: true,
-    },
-    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-  });
-
-  if (!nextWaitlisted) {
-    return false;
-  }
-
-  const updateResult = await transaction.appointment.updateMany({
-    where: { id: nextWaitlisted.id, status: 'PENDING', isWaitlisted: true },
-    data: {
-      status: 'CONFIRMED',
-      isWaitlisted: false,
-      usesCapacity: true,
-      notified7Days: false,
-      notified3Days: false,
-      notified1Day: false,
-      notified1Hour: false,
-    },
-  });
-
-  if (updateResult.count !== 1) {
-    return false;
-  }
-
-  await transaction.hospitalSlot.updateMany({
-    where: { id: slot.id, isClosed: false, booked: { lt: slot.capacity } },
-    data: { booked: { increment: 1 } },
-  });
-
-  return true;
-}
-
 export async function GET(req: Request) {
   const session = await getSession();
   if (!session) {
@@ -116,7 +45,7 @@ export async function GET(req: Request) {
     }
 
     const child = await prisma.child.findFirst({
-      where: { id: childId, userId: session.userId },
+      where: { id: childId, userId: session.userId, archivedAt: null },
       select: { id: true },
     });
     if (!child) {
@@ -155,7 +84,7 @@ export async function POST(req: Request) {
 
     const appointment = await prisma.$transaction(async (transaction) => {
       const child = await transaction.child.findFirst({
-        where: { id: childId, userId: session.userId },
+        where: { id: childId, userId: session.userId, archivedAt: null },
         select: { id: true },
       });
       if (!child) {
@@ -242,19 +171,7 @@ export async function PATCH(req: Request) {
       }
 
       if (status === 'CANCELLED') {
-        if (currentAppointment.hospitalId && currentAppointment.usesCapacity && !currentAppointment.isWaitlisted) {
-          const currentSlot = getBangkokSlot(currentAppointment.scheduledAt);
-          await transaction.hospitalSlot.updateMany({
-            where: {
-              hospitalId: currentAppointment.hospitalId,
-              date: currentSlot.date,
-              time: currentSlot.time,
-              booked: { gt: 0 },
-            },
-            data: { booked: { decrement: 1 } },
-          });
-          await promoteWaitlistedAppointment(transaction, currentAppointment.hospitalId, currentAppointment.scheduledAt);
-        }
+        await releaseAppointmentCapacity(transaction, currentAppointment);
 
         const appointment = await transaction.appointment.update({
           where: { id: appointmentId },

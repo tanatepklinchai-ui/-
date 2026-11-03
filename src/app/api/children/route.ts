@@ -12,11 +12,17 @@ export async function GET() {
   }
 
   try {
-    const children = await prisma.child.findMany({
-      where: { userId: session.userId },
-      orderBy: { createdAt: 'asc' },
-    });
-    return NextResponse.json({ children });
+    const [children, archivedChildren] = await Promise.all([
+      prisma.child.findMany({
+        where: { userId: session.userId, archivedAt: null },
+        orderBy: { createdAt: 'asc' },
+      }),
+      prisma.child.findMany({
+        where: { userId: session.userId, archivedAt: { not: null } },
+        orderBy: { archivedAt: 'desc' },
+      }),
+    ]);
+    return NextResponse.json({ children, archivedChildren });
   } catch {
     return NextResponse.json({ error: 'ไม่สามารถดึงข้อมูลเด็กได้' }, { status: 500 });
   }

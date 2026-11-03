@@ -16,7 +16,7 @@ export async function GET(req: Request) {
   }
 
   const child = await prisma.child.findFirst({
-    where: { id: childId, userId: session.userId },
+    where: { id: childId, userId: session.userId, archivedAt: null },
     include: { vaccineRecords: { orderBy: { administeredDate: 'desc' } } },
   });
   if (!child) {
@@ -56,7 +56,7 @@ export async function POST(req: Request) {
   }
 
   const child = await prisma.child.findFirst({
-    where: { id: childId, userId: session.userId },
+    where: { id: childId, userId: session.userId, archivedAt: null },
     select: { id: true },
   });
   if (!child) {

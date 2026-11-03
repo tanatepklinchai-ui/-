@@ -69,6 +69,7 @@ model Child {
   weight         Float?
   height         Float?
   dob            DateTime?
+  archivedAt     DateTime?
   appointments   Appointment[]
   vaccineRecords VaccineRecord[]
   createdAt      DateTime        @default(now())

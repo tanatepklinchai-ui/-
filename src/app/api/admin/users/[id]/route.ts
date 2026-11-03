@@ -39,6 +39,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
             dob: true,
             weight: true,
             height: true,
+            archivedAt: true,
             vaccineRecords: {
               orderBy: { administeredDate: 'desc' },
               select: {

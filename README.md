@@ -38,6 +38,8 @@ Keep secret values out of source control. Admin registration only grants the `AD
 
 Admins can promote or demote accounts from the **จัดการผู้ใช้งาน** tab in the admin dashboard. The system prevents demoting the account currently in use or removing the last administrator. A newly promoted user must sign out and sign in again to receive an admin session.
 
+Users and admins can temporarily delete a child's profile and restore it later, or permanently delete it. Permanent deletion also removes that child's appointments and vaccine records. Apply the child archival migration with `npx prisma migrate deploy` before deploying the app.
+
 The **กิจกรรมผู้ใช้** tab records successful sign-ins, registrations, child profile changes, appointment actions, vaccine record/request submissions, notification email changes, and Push notification subscription changes. It shows the latest 100 events and does not store health details in the activity log. Apply the activity log migration with `npx prisma migrate deploy`.
 
 The admin appointment queue refreshes automatically every 10 seconds while its tab is open. Cancelled, expired, no-show, and completed appointments are shown separately under **ประวัติการจอง**. The user-management tab also provides each user's profile, children, verified vaccine progress, vaccine records, and appointment history.
